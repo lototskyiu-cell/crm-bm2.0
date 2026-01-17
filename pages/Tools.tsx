@@ -100,6 +100,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
       return folder ? folder.name : '...';
   };
 
+  // ... (Keep existing modals open/save/delete logic) ...
   const openNewFolderModal = () => {
       setFolderForm({ id: null, name: '', color: '#3b82f6' });
       setIsFolderModalOpen(true);
@@ -205,7 +206,6 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
       setDeleteConfirm({ isOpen: true, type: 'tool', id });
   }
 
-  // NEW: Delete Folder Handler
   const handleDeleteFolder = (e: React.MouseEvent, id: string) => {
       e.stopPropagation();
       setDeleteConfirm({ isOpen: true, type: 'folder', id });
@@ -504,7 +504,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
            <h1 className="text-2xl font-bold text-gray-900">Витратні інструменти</h1>
            <p className="text-gray-500 text-sm">Управління складом та видачею</p>
         </div>
-        <div className="flex bg-white p-1 rounded-xl shadow-sm border border-gray-200 mt-4 md:mt-0">
+        <div className="flex bg-white p-1 rounded-xl shadow-sm border border-gray-200 mt-4 md:mt-0 w-full md:w-auto overflow-x-auto whitespace-nowrap">
            {currentUser.role === 'admin' && (
                <>
                 <button onClick={() => setActiveTab('catalog')} className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center transition-all ${activeTab === 'catalog' ? 'bg-slate-900 text-white' : 'text-gray-500 hover:text-gray-800'}`}>
@@ -530,6 +530,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
          {/* CATALOG TAB */}
          {activeTab === 'catalog' && (
              <div className="h-full flex flex-col">
+                 {/* ... (breadcrumb logic remains same) */}
                  <div 
                     className={`p-4 border-b border-gray-100 flex justify-between items-center ${draggedItem ? 'bg-blue-50 border-blue-200' : 'bg-gray-50'}`}
                     onDragOver={handleDragOver}
@@ -559,6 +560,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
                  </div>
 
                  <div className="p-6 overflow-y-auto grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 align-start content-start">
+                     {/* ... (folder/tool rendering same logic) ... */}
                      {filterFolders(catalogFolders).map(f => (
                          <div key={f.id} 
                               onClick={() => setCurrentCatalogFolderId(f.id)}
@@ -788,9 +790,9 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
                          </div>
                      )}
 
-                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                          {productionItems.length === 0 && productionFolders.length === 0 && (
-                            <div className="col-span-3 text-center py-10 text-gray-400">
+                            <div className="col-span-full text-center py-10 text-gray-400">
                                 <Package size={48} className="mx-auto mb-2 opacity-20"/>
                                 <p className="text-sm">Тут порожньо</p>
                             </div>
@@ -846,42 +848,46 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
                          <Download size={16} className="mr-2"/> Експорт Excel
                      </button>
                  </div>
-                 <div className="flex-1 overflow-y-auto p-0">
-                     <table className="w-full text-sm text-left">
-                         <thead className="bg-gray-50 text-gray-500 font-medium border-b sticky top-0">
-                             <tr>
-                                 <th className="p-4">Дата</th>
-                                 <th className="p-4">Працівник</th>
-                                 <th className="p-4">Тип операції</th>
-                                 <th className="p-4">Інструмент</th>
-                                 <th className="p-4 text-right">Кількість</th>
-                                 <th className="p-4">Ціль / Нотатка</th>
-                             </tr>
-                         </thead>
-                         <tbody className="divide-y divide-gray-100">
-                             {transactions.map(tr => {
-                                 const tool = tools.find(t => t.id === tr.toolId);
-                                 return (
-                                     <tr key={tr.id} className="hover:bg-gray-50">
-                                         <td className="p-4 text-gray-500">{new Date(tr.date).toLocaleString('uk-UA')}</td>
-                                         <td className="p-4 font-bold text-gray-700">{tr.userName}</td>
-                                         <td className="p-4">
-                                             <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${
-                                                 tr.type === 'import' ? 'bg-green-100 text-green-700' :
-                                                 tr.type === 'usage' ? 'bg-orange-100 text-orange-700' :
-                                                 'bg-blue-100 text-blue-700'
-                                             }`}>
-                                                 {tr.type === 'import' ? 'Прихід' : tr.type === 'usage' ? 'Використання' : 'Переміщення'}
-                                             </span>
-                                         </td>
-                                         <td className="p-4 text-gray-900">{tool?.name}</td>
-                                         <td className="p-4 text-right font-mono font-bold">{tr.amount}</td>
-                                         <td className="p-4 text-gray-500 text-xs">{tr.target}</td>
+                 <div className="flex-1 overflow-x-auto p-0">
+                     <div className="min-w-full inline-block align-middle">
+                         <div className="overflow-hidden">
+                             <table className="min-w-[800px] w-full text-sm text-left">
+                                 <thead className="bg-gray-50 text-gray-500 font-medium border-b sticky top-0">
+                                     <tr>
+                                         <th className="p-4">Дата</th>
+                                         <th className="p-4">Працівник</th>
+                                         <th className="p-4">Тип операції</th>
+                                         <th className="p-4">Інструмент</th>
+                                         <th className="p-4 text-right">Кількість</th>
+                                         <th className="p-4">Ціль / Нотатка</th>
                                      </tr>
-                                 );
-                             })}
-                         </tbody>
-                     </table>
+                                 </thead>
+                                 <tbody className="divide-y divide-gray-100">
+                                     {transactions.map(tr => {
+                                         const tool = tools.find(t => t.id === tr.toolId);
+                                         return (
+                                             <tr key={tr.id} className="hover:bg-gray-50">
+                                                 <td className="p-4 text-gray-500">{new Date(tr.date).toLocaleString('uk-UA')}</td>
+                                                 <td className="p-4 font-bold text-gray-700">{tr.userName}</td>
+                                                 <td className="p-4">
+                                                     <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${
+                                                         tr.type === 'import' ? 'bg-green-100 text-green-700' :
+                                                         tr.type === 'usage' ? 'bg-orange-100 text-orange-700' :
+                                                         'bg-blue-100 text-blue-700'
+                                                     }`}>
+                                                         {tr.type === 'import' ? 'Прихід' : tr.type === 'usage' ? 'Використання' : 'Переміщення'}
+                                                     </span>
+                                                 </td>
+                                                 <td className="p-4 text-gray-900">{tool?.name}</td>
+                                                 <td className="p-4 text-right font-mono font-bold">{tr.amount}</td>
+                                                 <td className="p-4 text-gray-500 text-xs">{tr.target}</td>
+                                             </tr>
+                                         );
+                                     })}
+                                 </tbody>
+                             </table>
+                         </div>
+                     </div>
                  </div>
              </div>
          )}
@@ -889,7 +895,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
 
       {isFolderModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-sm p-6 m-4 md:m-0">
                   <h3 className="font-bold text-lg mb-2">{folderForm.id ? 'Редагувати папку' : 'Нова папка'}</h3>
                   <div className="text-xs text-gray-500 mb-4 flex items-center bg-gray-50 p-2 rounded">
                       <CornerDownRight size={12} className="mr-1"/> 
@@ -937,7 +943,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
 
       {isToolModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-md p-6 m-4 md:m-0">
                   <h3 className="font-bold text-lg mb-4">{editingId ? 'Редагувати інструмент' : 'Новий інструмент'}</h3>
                   <div className="space-y-4">
                       <div>
@@ -1019,7 +1025,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
 
       {isAddToWarehouseOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-md p-6 m-4 md:m-0">
                   <h3 className="font-bold text-lg mb-1">Додати позицію з каталогу</h3>
                   <div className="text-xs text-gray-500 mb-4 flex items-center bg-gray-50 p-2 rounded">
                       <CornerDownRight size={12} className="mr-1"/> 
@@ -1074,7 +1080,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
       
       {isAddToProductionOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-md p-6 m-4 md:m-0">
                   <h3 className="font-bold text-lg mb-1">Додати інструмент у виробництво</h3>
                   <div className="text-xs text-gray-500 mb-4 flex items-center bg-gray-50 p-2 rounded">
                       <CornerDownRight size={12} className="mr-1"/> 
@@ -1130,7 +1136,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
 
       {isStockModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-sm p-6 m-4 md:m-0">
                   <h3 className="font-bold text-lg mb-4">{stockOp.type === 'add' ? 'Поповнення складу' : 'Переміщення на виробництво'}</h3>
                   <div className="space-y-4">
                       <div>
@@ -1154,7 +1160,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
 
       {isUsageModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-sm p-6 m-4 md:m-0">
                   <h3 className="font-bold text-lg mb-4">Взяти інструмент</h3>
                   <div className="space-y-4">
                       <div>

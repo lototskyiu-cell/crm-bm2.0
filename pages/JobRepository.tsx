@@ -62,6 +62,7 @@ export const JobRepository: React.FC<JobRepositoryProps> = ({ onSelectCycle }) =
       setBreadcrumbs(breadcrumbs.slice(0, index + 1));
   };
 
+  // ... (Keep existing CRUD handlers) ...
   const handleCreate = async () => {
     if (!newItemName) return;
     if (isSubmitting) return;
@@ -169,8 +170,8 @@ export const JobRepository: React.FC<JobRepositoryProps> = ({ onSelectCycle }) =
       <div className="mb-8 flex justify-between items-end">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 mb-4">Сховище робіт</h1>
-          <div className="flex items-center gap-4">
-              <div className="flex items-center text-sm text-gray-500 bg-white px-4 py-2 rounded-lg border border-gray-200 w-fit shadow-sm">
+          <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
+              <div className="flex items-center text-sm text-gray-500 bg-white px-4 py-2 rounded-lg border border-gray-200 w-full md:w-fit shadow-sm overflow-x-auto whitespace-nowrap">
                 {breadcrumbs.map((crumb, idx, arr) => (
                    <React.Fragment key={crumb.id}>
                      <button 
@@ -207,13 +208,13 @@ export const JobRepository: React.FC<JobRepositoryProps> = ({ onSelectCycle }) =
             onClick={() => openModal('folder')}
             className="bg-white text-gray-700 border border-gray-200 px-4 py-2 rounded-lg flex items-center hover:bg-gray-50 transition-colors font-medium shadow-sm"
           >
-            <FolderPlus size={18} className="mr-2 text-gray-500"/> Папка
+            <FolderPlus size={18} className="mr-2 text-gray-500"/> <span className="hidden sm:inline">Папка</span>
           </button>
           <button 
             onClick={() => openModal('cycle')}
             className="bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center shadow-lg hover:bg-slate-800 transition-colors font-bold"
           >
-            <FilePlus size={18} className="mr-2"/> Створити цикл
+            <FilePlus size={18} className="mr-2"/> <span className="hidden sm:inline">Створити цикл</span><span className="sm:hidden">Цикл</span>
           </button>
         </div>
       </div>
@@ -286,7 +287,7 @@ export const JobRepository: React.FC<JobRepositoryProps> = ({ onSelectCycle }) =
 
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-visible">
+           <div className="bg-white rounded-2xl shadow-2xl w-[95%] md:w-full md:max-w-md overflow-visible m-4 md:m-0">
               <div className="px-6 py-4 border-b flex justify-between items-center bg-gray-50">
                  <h3 className="font-bold text-gray-800">
                     {editingId ? 'Редагування' : (createType === 'folder' ? 'Нова папка' : 'Новий цикл робіт')}

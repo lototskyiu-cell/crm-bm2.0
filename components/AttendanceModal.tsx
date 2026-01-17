@@ -4,8 +4,8 @@ import { AttendanceRecord, AbsenceType, TransportMode, Break, User, WorkSchedule
 import { API } from '../services/api';
 import { DEFAULT_BREAKS } from '../services/mockStore'; 
 import { PayrollService } from '../services/payroll';
-import { AttendanceLogic } from '../services/attendanceLogic'; // IMPORT LOGIC
-import { DeleteConfirmModal } from './DeleteConfirmModal'; // Import Confirmation Modal
+import { AttendanceLogic } from '../services/attendanceLogic';
+import { DeleteConfirmModal } from './DeleteConfirmModal';
 import { X, Save, Clock, Bus, Car, Plus, Trash2, CheckCircle, Calendar, AlertTriangle, Info, Settings, Moon, Sun, ShoppingBag } from 'lucide-react';
 
 interface AttendanceModalProps {
@@ -85,12 +85,8 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
       // Find specific record for this date
       const record = allRecords.find(r => r.date === date);
 
-      // --- LOGIC: DEFAULTS vs OVERRIDES ---
-      // We use the helper to determine effective values
-      // If record exists, helper uses it. If not, helper uses user defaults.
       const effectiveData = u ? AttendanceLogic.getEffectiveDailyData(u, record) : { transportMode: 'car', distanceTo: 0, distanceFrom: 0, fuelConsumption: 0, fuelPrice: 0, busPriceTo: 0, busPriceFrom: 0 };
       
-      // Standard Fields (Not part of defaults logic)
       if (record) {
         setExistingId(record.id);
         setVerifiedByAdmin(record.verifiedByAdmin || false);
@@ -129,8 +125,6 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
         }
       }
 
-      // Apply Effective Data (Merged) to UI State
-      // Note: We cast effectiveData keys because helper guarantees they exist
       setTransportMode(effectiveData.transportMode as TransportMode);
       setDistanceTo(effectiveData.distanceTo as number);
       setDistanceFrom(effectiveData.distanceFrom as number);
@@ -154,24 +148,6 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
     }
   };
 
-  const activeSchedule = schedules.find(s => s.id === selectedScheduleId);
-
-  // Live Calculations use state values (which are now effective values)
-  const tempRecord: AttendanceRecord = {
-    id: 'temp', userId, date, type: 'work',
-    transportMode, distanceTo, distanceFrom, fuelConsumption, fuelPrice,
-    busPriceTo, busPriceFrom, startTime, endTime, breaks,
-    additionalExpenses,
-    verifiedByAdmin, overtimeApproved,
-    workScheduleId: selectedScheduleId
-  };
-
-  const workDuration = PayrollService.calculateWorkDuration(tempRecord);
-  const transportCost = PayrollService.calculateTransportCost(tempRecord); 
-  const additionalExpensesCost = PayrollService.calculateAdditionalExpensesCost(tempRecord);
-  const dailySalary = user ? PayrollService.calculateDailySalary(tempRecord, user, schedules) : 0;
-  const { overtimeHours } = user ? PayrollService.calculateOvertime(tempRecord, user, schedules) : { overtimeHours: 0 };
-  
   const handleAddBreak = () => {
     setBreaks([...breaks, { id: `b_${Date.now()}`, name: 'Нова перерва', durationMinutes: 15, isPaid: false }]);
   };
@@ -205,9 +181,6 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
   const handleSave = async () => {
     if (!user) return;
 
-    // We save the CURRENT state values. 
-    // This effectively "snapshots" the defaults + overrides into the record for this specific day.
-    // This protects historical data accuracy.
     const record: AttendanceRecord = {
       id: existingId || `rec_${Date.now()}`,
       userId,
@@ -275,7 +248,7 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col my-auto max-h-[90vh] overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-2xl w-[95%] md:w-full md:max-w-md flex flex-col my-auto max-h-[90vh] overflow-hidden m-4 md:m-0">
         
         {/* Header */}
         <div className="bg-slate-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center shrink-0">
@@ -302,328 +275,156 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
             Записати роботу
           </button>
           <button 
-            className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeTab === 'absence' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeTab === 'absence' ? 'bg-white text-slate-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
             onClick={() => setActiveTab('absence')}
           >
             Відсутність
           </button>
         </div>
 
-        {/* Content Scroll Area */}
-        <div className="p-6 overflow-y-auto min-h-0 flex-1">
-          {activeTab === 'work' && (
-            <div className="space-y-6">
-              
-              {/* Calculation Preview (Read-Only) */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-blue-50 p-3 rounded-xl border border-blue-100">
-                  <div className="text-[10px] uppercase font-bold text-blue-400 mb-1">Години</div>
-                  <div className="flex items-end justify-between">
-                    <span className="text-xl font-bold text-blue-900">{workDuration}</span>
-                    <span className="text-xs font-medium text-blue-600 mb-1">год</span>
+        {/* Content */}
+        <div className="p-6 overflow-y-auto space-y-6 flex-1">
+          {activeTab === 'work' ? (
+             <div className="space-y-6 animate-fade-in">
+               {/* Time & Schedule */}
+               <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Початок</label>
+                    <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} className="w-full p-2.5 border rounded-lg bg-gray-50"/>
                   </div>
-                </div>
-                <div className={`p-3 rounded-xl border ${overtimeHours > 0 ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-100'}`}>
-                   <div className={`text-[10px] uppercase font-bold mb-1 ${overtimeHours > 0 ? 'text-green-600' : 'text-gray-400'}`}>Понаднормові</div>
-                   <div className="flex items-end justify-between">
-                    <span className={`text-xl font-bold ${overtimeHours > 0 ? 'text-green-800' : 'text-gray-300'}`}>+{overtimeHours}</span>
-                    <span className={`text-xs font-medium mb-1 ${overtimeHours > 0 ? 'text-green-700' : 'text-gray-300'}`}>год</span>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Кінець</label>
+                    <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} className="w-full p-2.5 border rounded-lg bg-gray-50"/>
                   </div>
-                </div>
-                <div className="bg-green-50 p-3 rounded-xl border border-green-100">
-                   <div className="text-[10px] uppercase font-bold text-green-600 mb-1">Зарплата</div>
-                   <div className="flex items-end justify-between">
-                    <span className="text-xl font-bold text-green-900">{dailySalary}</span>
-                    <span className="text-xs font-medium text-green-700 mb-1">грн</span>
+               </div>
+               
+               {/* Transport Mode */}
+               <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Транспорт</label>
+                  <div className="flex bg-gray-100 p-1 rounded-lg">
+                     <button onClick={() => setTransportMode('car')} className={`flex-1 py-2 text-xs font-bold rounded flex items-center justify-center ${transportMode === 'car' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}><Car size={14} className="mr-1"/> Авто</button>
+                     <button onClick={() => setTransportMode('bus')} className={`flex-1 py-2 text-xs font-bold rounded flex items-center justify-center ${transportMode === 'bus' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}><Bus size={14} className="mr-1"/> Громадський</button>
                   </div>
-                </div>
-                <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
-                   <div className="text-[10px] uppercase font-bold text-gray-500 mb-1">Компенсація + Інше</div>
-                   <div className="flex items-end justify-between">
-                    <span className="text-xl font-bold text-gray-700">{transportCost + additionalExpensesCost}</span>
-                    <span className="text-xs font-medium text-gray-500 mb-1">грн</span>
-                  </div>
-                </div>
-              </div>
+               </div>
 
-              {/* Schedule Selection - DROPDOWN */}
-              <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-bold text-indigo-900 uppercase flex items-center">
-                    <Calendar size={12} className="mr-1.5 text-indigo-500"/> Графік роботи
-                  </label>
-                  {activeSchedule && (
-                     <div className="flex items-center space-x-2">
-                        {activeSchedule.type === 'night' ? <Moon size={12} className="text-indigo-400"/> : <Sun size={12} className="text-orange-400"/>}
-                        <span className="text-[10px] font-bold text-indigo-400 bg-white px-1.5 py-0.5 rounded border border-indigo-100">
-                           {activeSchedule.shiftDurationHours}г
-                        </span>
+               {transportMode === 'car' ? (
+                 <div className="space-y-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
+                    <div className="grid grid-cols-2 gap-4">
+                       <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Км (Туди)</label><input type="number" value={distanceTo} onChange={e => setDistanceTo(Number(e.target.value))} className="w-full p-2 border rounded font-bold"/></div>
+                       <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Км (Назад)</label><input type="number" value={distanceFrom} onChange={e => setDistanceFrom(Number(e.target.value))} className="w-full p-2 border rounded font-bold"/></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                       <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Витрата (л/100)</label><input type="number" value={fuelConsumption} onChange={e => setFuelConsumption(Number(e.target.value))} className="w-full p-2 border rounded"/></div>
+                       <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Ціна (грн/л)</label><input type="number" value={fuelPrice} onChange={e => setFuelPrice(Number(e.target.value))} className="w-full p-2 border rounded"/></div>
+                    </div>
+                 </div>
+               ) : (
+                 <div className="space-y-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
+                    <div className="grid grid-cols-2 gap-4">
+                       <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Квиток (Туди)</label><input type="number" value={busPriceTo} onChange={e => setBusPriceTo(Number(e.target.value))} className="w-full p-2 border rounded font-bold"/></div>
+                       <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Квиток (Назад)</label><input type="number" value={busPriceFrom} onChange={e => setBusPriceFrom(Number(e.target.value))} className="w-full p-2 border rounded font-bold"/></div>
+                    </div>
+                 </div>
+               )}
+
+               {/* Breaks */}
+               <div>
+                  <div className="flex justify-between items-center mb-2">
+                     <label className="block text-xs font-bold text-gray-500 uppercase">Перерви</label>
+                     <button onClick={handleAddBreak} className="text-xs text-blue-600 font-bold hover:underline flex items-center"><Plus size={12} className="mr-1"/> Додати</button>
+                  </div>
+                  <div className="space-y-2">
+                     {breaks.map((b, i) => (
+                        <div key={b.id || i} className="flex gap-2 items-center">
+                           <input value={b.name} onChange={e => {const n = [...breaks]; n[i].name = e.target.value; setBreaks(n)}} className="flex-1 p-2 border rounded text-sm"/>
+                           <input type="number" value={b.durationMinutes} onChange={e => {const n = [...breaks]; n[i].durationMinutes = Number(e.target.value); setBreaks(n)}} className="w-16 p-2 border rounded text-sm text-center"/>
+                           <span className="text-xs text-gray-400">хв</span>
+                           <button onClick={() => handleRemoveBreak(i)} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
+                        </div>
+                     ))}
+                  </div>
+               </div>
+
+               {/* Additional Expenses */}
+               <div>
+                  <div className="flex justify-between items-center mb-2">
+                     <label className="block text-xs font-bold text-gray-500 uppercase">Додаткові витрати</label>
+                  </div>
+                  <div className="space-y-2 mb-2">
+                     {additionalExpenses.map(exp => (
+                        <div key={exp.id} className="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-100 text-sm">
+                           <span>{exp.name}</span>
+                           <div className="flex items-center gap-3">
+                              {exp.extraDistance > 0 && <span className="text-xs text-gray-500">{exp.extraDistance} км</span>}
+                              <span className="font-bold">{exp.amount} ₴</span>
+                              <button onClick={() => handleRemoveExpense(exp.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14}/></button>
+                           </div>
+                        </div>
+                     ))}
+                  </div>
+                  <div className="flex gap-2 items-end bg-gray-50 p-2 rounded border border-gray-200">
+                     <div className="flex-1"><label className="text-[9px] uppercase text-gray-400 font-bold">Назва</label><input value={newExpName} onChange={e => setNewExpName(e.target.value)} className="w-full p-1 border rounded text-sm"/></div>
+                     <div className="w-16"><label className="text-[9px] uppercase text-gray-400 font-bold">Сума</label><input type="number" value={newExpAmount} onChange={e => setNewExpAmount(e.target.value)} className="w-full p-1 border rounded text-sm"/></div>
+                     <button onClick={handleAddExpense} disabled={!newExpName} className="bg-blue-600 text-white p-1.5 rounded hover:bg-blue-700 disabled:opacity-50"><Plus size={16}/></button>
+                  </div>
+               </div>
+
+               {/* Admin Controls */}
+               {isAdmin && (
+                  <div className="border-t pt-4 mt-4">
+                     <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Адміністрування</label>
+                     <div className="flex gap-4">
+                        <label className="flex items-center space-x-2 cursor-pointer bg-green-50 px-3 py-2 rounded border border-green-100">
+                           <input type="checkbox" checked={verifiedByAdmin} onChange={e => setVerifiedByAdmin(e.target.checked)} className="text-green-600 focus:ring-green-500 rounded"/>
+                           <span className="text-sm font-medium text-green-800">Перевірено</span>
+                        </label>
+                        <label className="flex items-center space-x-2 cursor-pointer bg-yellow-50 px-3 py-2 rounded border border-yellow-100">
+                           <input type="checkbox" checked={overtimeApproved} onChange={e => setOvertimeApproved(e.target.checked)} className="text-yellow-600 focus:ring-yellow-500 rounded"/>
+                           <span className="text-sm font-medium text-yellow-800">Овертайм ОК</span>
+                        </label>
                      </div>
-                  )}
-                </div>
-                
-                <div className="relative group">
-                  <select 
-                    value={selectedScheduleId} 
-                    onChange={(e) => handleScheduleChange(e.target.value)}
-                    className="w-full p-3 bg-white border border-indigo-200 rounded-lg text-sm font-medium text-gray-800 focus:ring-2 focus:ring-indigo-300 outline-none appearance-none cursor-pointer hover:border-indigo-300 transition-colors"
-                  >
-                    <option value="">-- Оберіть графік --</option>
-                    {schedules.map(sch => (
-                       <option key={sch.id} value={sch.id}>{sch.name} ({sch.shiftDurationHours}г)</option>
-                    ))}
-                  </select>
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
-                     <Settings size={14} />
                   </div>
-                </div>
-              </div>
-
-              {/* Transport Block */}
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <label className="text-xs font-bold text-gray-400 uppercase block">Транспорт</label>
-                  {/* Indicator for Defaults Usage */}
-                  <span className="text-[9px] bg-blue-50 text-blue-600 px-1.5 rounded uppercase font-bold">
-                    {existingId ? 'Редагування' : 'Авто-Дефолти'}
-                  </span>
-                </div>
-                
-                <div className="flex gap-2 mb-3">
-                  <button onClick={() => setTransportMode('car')} className={`flex-1 py-2 flex items-center justify-center rounded-lg border text-sm font-medium transition-all ${transportMode === 'car' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-200'}`}>
-                    <Car size={16} className="mr-2"/> Авто
-                  </button>
-                  <button onClick={() => setTransportMode('bus')} className={`flex-1 py-2 flex items-center justify-center rounded-lg border text-sm font-medium transition-all ${transportMode === 'bus' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-200'}`}>
-                    <Bus size={16} className="mr-2"/> Автобус
-                  </button>
-                </div>
-                
-                {transportMode === 'car' ? (
-                   <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-gray-500 uppercase font-bold">Км Туди</span>
-                        <input type="number" value={distanceTo} onChange={e => setDistanceTo(Number(e.target.value))} className="w-full p-2 text-sm border rounded bg-gray-50 font-bold"/>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-gray-500 uppercase font-bold">Км Назад</span>
-                        <input type="number" value={distanceFrom} onChange={e => setDistanceFrom(Number(e.target.value))} className="w-full p-2 text-sm border rounded bg-gray-50 font-bold"/>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-gray-500 uppercase font-bold">Витрата (л)</span>
-                        <input type="number" value={fuelConsumption} onChange={e => setFuelConsumption(Number(e.target.value))} className="w-full p-2 text-sm border rounded bg-gray-50 font-bold"/>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-gray-500 uppercase font-bold">Ціна (грн)</span>
-                        <input type="number" value={fuelPrice} onChange={e => setFuelPrice(Number(e.target.value))} className="w-full p-2 text-sm border rounded bg-gray-50 font-bold"/>
-                      </div>
-                   </div>
-                ) : (
-                   <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-gray-500 uppercase font-bold">Квиток Туди</span>
-                        <input type="number" value={busPriceTo} onChange={e => setBusPriceTo(Number(e.target.value))} className="w-full p-2 text-sm border rounded bg-gray-50 font-bold"/>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-gray-500 uppercase font-bold">Квиток Назад</span>
-                        <input type="number" value={busPriceFrom} onChange={e => setBusPriceFrom(Number(e.target.value))} className="w-full p-2 text-sm border rounded bg-gray-50 font-bold"/>
-                      </div>
-                   </div>
-                )}
-              </div>
-
-              {/* --- NEW SECTION: ADDITIONAL EXPENSES --- */}
-              <div className="border border-blue-100 rounded-xl overflow-hidden">
-                <div className="bg-blue-50 px-3 py-2 border-b border-blue-100 flex items-center">
-                  <ShoppingBag size={14} className="text-blue-600 mr-2"/>
-                  <span className="text-xs font-bold text-blue-800 uppercase">Додаткові витрати (за дорученням)</span>
-                </div>
-                <div className="p-3 bg-white space-y-3">
-                  {/* List */}
-                  {additionalExpenses.map(exp => (
-                    <div key={exp.id} className="flex items-center justify-between text-sm p-2 bg-gray-50 rounded border border-gray-100">
-                      <div className="flex-1">
-                        <div className="font-bold text-gray-800">{exp.name}</div>
-                        <div className="text-[10px] text-gray-500 flex gap-2">
-                           {exp.extraDistance > 0 && <span className="bg-white border px-1 rounded">+{exp.extraDistance}км</span>}
-                           {exp.amount > 0 && <span className="text-blue-600 font-bold">{exp.amount} грн</span>}
-                        </div>
-                      </div>
-                      <button onClick={() => handleRemoveExpense(exp.id)} className="text-gray-400 hover:text-red-500 p-1">
-                        <Trash2 size={16}/>
-                      </button>
-                    </div>
-                  ))}
-
-                  {/* Add Row */}
-                  <div className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2 items-end">
-                    <div>
-                      <label className="text-[10px] text-gray-400 font-bold block mb-1">Назва / Комент</label>
-                      <input 
-                        type="text" 
-                        value={newExpName} 
-                        onChange={e => setNewExpName(e.target.value)}
-                        className="w-full p-2 text-sm border rounded bg-gray-50"
-                        placeholder="Напр: Епіцентр"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-gray-400 font-bold block mb-1">+Км</label>
-                      <input 
-                        type="number" 
-                        value={newExpDist} 
-                        onChange={e => setNewExpDist(e.target.value)}
-                        className="w-full p-2 text-sm border rounded bg-gray-50"
-                        placeholder="0"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-gray-400 font-bold block mb-1">Сума</label>
-                      <input 
-                        type="number" 
-                        value={newExpAmount} 
-                        onChange={e => setNewExpAmount(e.target.value)}
-                        className="w-full p-2 text-sm border rounded bg-gray-50"
-                        placeholder="0"
-                      />
-                    </div>
-                    <button 
-                      onClick={handleAddExpense}
-                      disabled={!newExpName}
-                      className="p-2 bg-slate-900 text-white rounded hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Plus size={18}/>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Work Time & Breaks */}
-              <div className="space-y-4 pt-2 border-t border-gray-100">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-bold text-gray-400 uppercase mb-1 block">Початок</label>
-                    <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} className="w-full p-2.5 border rounded-lg text-lg font-mono font-bold text-gray-800 bg-gray-50"/>
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-gray-400 uppercase mb-1 block">Кінець</label>
-                    <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} className="w-full p-2.5 border rounded-lg text-lg font-mono font-bold text-gray-800 bg-gray-50"/>
-                  </div>
-                </div>
-
-                <div className="bg-white border rounded-xl overflow-hidden">
-                   <div className="bg-gray-50 px-3 py-2 border-b flex justify-between items-center">
-                      <span className="text-xs font-bold text-gray-500 uppercase">Перерви</span>
-                      {isAdmin && <button onClick={handleAddBreak} className="text-blue-600 hover:text-blue-700"><Plus size={16}/></button>}
-                   </div>
-                   <div className="divide-y divide-gray-100">
-                      {breaks.map((brk, idx) => (
-                        <div key={idx} className="p-2 flex items-center justify-between group">
-                           <div className="flex items-center flex-1">
-                              {/* Read Only Name unless admin */}
-                              <span className="text-sm font-medium text-gray-700 w-24 truncate">{brk.name}</span>
-                              
-                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase ml-2 ${brk.isPaid ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                                {brk.isPaid ? 'Paid' : 'Unpaid'}
-                              </span>
-                           </div>
-                           <div className="flex items-center space-x-2">
-                              {/* Read Only Duration unless admin */}
-                              <span className="text-sm font-mono text-gray-600 font-bold">{brk.durationMinutes}</span>
-                              <span className="text-xs text-gray-400">хв</span>
-                              
-                              {isAdmin && (
-                                <button onClick={() => handleRemoveBreak(idx)} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={14}/></button>
-                              )}
-                           </div>
-                        </div>
-                      ))}
-                      {breaks.length === 0 && <div className="p-3 text-center text-xs text-gray-400 italic">Без перерв</div>}
-                   </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'absence' && (
-             <div className="space-y-4">
-                <div className="bg-red-50 p-4 rounded-xl border border-red-100">
-                   <label className="text-xs font-bold text-red-400 uppercase mb-2 block">Тип відсутності</label>
-                   <select 
-                      value={absenceType} 
-                      onChange={(e) => setAbsenceType(e.target.value as AbsenceType)}
-                      className="w-full p-3 bg-white border border-red-200 rounded-lg text-gray-800 font-medium focus:ring-2 focus:ring-red-200 outline-none"
-                    >
-                      <option value="sick">🏥 Лікарняний</option>
-                      <option value="vacation">🏖 Відпустка</option>
-                      <option value="unpaid">💸 За свій рахунок</option>
-                      <option value="truancy">🚫 Прогул</option>
-                    </select>
+               )}
+             </div>
+          ) : (
+             <div className="space-y-6 animate-fade-in">
+                <div>
+                   <label className="block text-sm font-bold text-gray-700 mb-2">Тип відсутності</label>
+                   <select value={absenceType} onChange={e => setAbsenceType(e.target.value as any)} className="w-full p-3 border rounded-lg bg-white">
+                      <option value="sick">Лікарняний</option>
+                      <option value="vacation">Відпустка</option>
+                      <option value="unpaid">За свій рахунок</option>
+                      <option value="truancy">Прогул</option>
+                   </select>
                 </div>
                 <div>
-                   <label className="text-xs font-bold text-gray-400 uppercase mb-2 block">Коментар</label>
-                   <textarea 
-                     value={comment} 
-                     onChange={(e) => setComment(e.target.value)}
-                     className="w-full p-4 border rounded-xl h-32 text-sm focus:ring-2 focus:ring-gray-200 outline-none resize-none"
-                     placeholder="Причина..."
-                   />
+                   <label className="block text-sm font-bold text-gray-700 mb-2">Коментар</label>
+                   <textarea value={comment} onChange={e => setComment(e.target.value)} className="w-full p-3 border rounded-lg h-32 resize-none" placeholder="Причина відсутності..."/>
                 </div>
              </div>
           )}
         </div>
 
-        {/* Footer Actions */}
-        <div className="bg-gray-50 p-4 border-t border-gray-100 shrink-0 space-y-3">
-          {/* Overtime Approval Block */}
-          {isAdmin && activeTab === 'work' && overtimeHours > 0 && (
-             <div className={`p-3 rounded-lg border flex items-center justify-between ${overtimeApproved ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'}`}>
-                <div className="flex items-center text-xs font-bold">
-                   {overtimeApproved ? <CheckCircle size={14} className="text-green-600 mr-2"/> : <AlertTriangle size={14} className="text-yellow-600 mr-2"/>}
-                   <span className={overtimeApproved ? 'text-green-800' : 'text-yellow-800'}>
-                      {overtimeApproved ? 'Понаднормові погоджено' : 'Потрібне погодження!'}
-                   </span>
-                </div>
-                <button 
-                  onClick={() => setOvertimeApproved(!overtimeApproved)}
-                  className={`text-xs px-2 py-1 rounded border shadow-sm font-bold bg-white transition-all ${overtimeApproved ? 'text-red-500 border-red-100 hover:bg-red-50' : 'text-green-600 border-green-100 hover:bg-green-50'}`}
-                >
-                  {overtimeApproved ? 'Відмінити' : 'Погодити'}
-                </button>
-             </div>
-          )}
-
-          {isAdmin && activeTab === 'work' && (
-             <label className="flex items-center justify-center cursor-pointer pb-2">
-                <input type="checkbox" checked={verifiedByAdmin} onChange={e => setVerifiedByAdmin(e.target.checked)} className="w-4 h-4 text-slate-900 rounded border-gray-300 focus:ring-slate-500"/>
-                <span className="ml-2 text-sm font-bold text-gray-700">Запис перевірено адміністратором</span>
-             </label>
-          )}
-
-          <div className="flex gap-2">
-            {existingId && (
-              <button 
-                onClick={handleDelete}
-                className="px-4 py-3.5 rounded-xl font-bold bg-red-100 text-red-600 hover:bg-red-200 transition-all flex items-center justify-center"
-              >
-                <Trash2 size={20}/>
-              </button>
-            )}
-            <button onClick={handleSave} className="flex-1 bg-slate-900 text-white py-3.5 rounded-xl font-bold shadow-lg shadow-slate-200 hover:bg-slate-800 active:scale-[0.98] transition-all flex items-center justify-center">
-               <Save size={18} className="mr-2"/>
-               Зберегти
-            </button>
-          </div>
+        {/* Footer */}
+        <div className="p-6 border-t border-gray-100 bg-gray-50 rounded-b-2xl flex justify-between items-center shrink-0">
+           {existingId ? (
+              <button onClick={handleDelete} className="text-red-500 hover:text-red-700 p-2 rounded hover:bg-red-50 transition-colors" title="Видалити запис"><Trash2 size={20}/></button>
+           ) : (<div></div>)}
+           <button onClick={handleSave} className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-slate-800 transition-colors flex items-center">
+              <Save size={18} className="mr-2"/> Зберегти
+           </button>
         </div>
-
       </div>
 
-      <DeleteConfirmModal 
-        isOpen={deleteConfirmOpen} 
-        onClose={() => setDeleteConfirmOpen(false)}
-        onConfirm={performDelete}
-        title="Видалити запис?"
-        message="Ви впевнені? Цю дію не можна скасувати. Це вплине на розрахунок зарплати."
-      />
+      {deleteConfirmOpen && (
+        <DeleteConfirmModal 
+            isOpen={deleteConfirmOpen}
+            onClose={() => setDeleteConfirmOpen(false)}
+            onConfirm={performDelete}
+            title="Видалити запис?"
+            message="Ви впевнені? Ця дія незворотня."
+        />
+      )}
     </div>
   );
 };

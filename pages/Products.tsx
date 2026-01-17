@@ -144,6 +144,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
     }
   }, [permsLoading, currentUser, activeMainTab, isSuperAdmin]);
 
+  // ... (Subscriptions remain same) ...
   useEffect(() => {
     let unsubscribeProducts: () => void;
     let unsubscribeStocks: () => void;
@@ -237,6 +238,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
 
   useEffect(() => {
     refreshMockData();
+    setSearchTerm(''); 
   }, [currentSection, currentWarehouseFolderId]);
 
   const refreshMockData = () => {
@@ -251,11 +253,9 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
         const order = orders.find(o => o.id === task.orderId);
         const product = products.find(p => p.id === order?.productId);
         
-        // Get all approved reports for this task
         const taskReports = reports.filter(r => r.taskId === task.id && r.status === 'approved');
 
         if (taskReports.length === 0) {
-             // Entry for task with no stock yet
              items.push({
                 uniqueId: task.id,
                 taskId: task.id,
@@ -269,7 +269,6 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                 isFinalStage: !!task.isFinalStage
              });
         } else {
-            // Group reports by batchCode
             const groups: Record<string, ProductionReport[]> = {};
             taskReports.forEach(r => {
                 const code = r.batchCode || 'Без партії';
@@ -307,7 +306,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
   };
 
   const renderBreadcrumbs = () => (
-    <div className="flex items-center text-sm text-gray-500 mb-6 bg-white px-4 py-2 rounded-lg border w-fit shadow-sm">
+    <div className="flex items-center text-sm text-gray-500 mb-6 bg-white px-4 py-2 rounded-lg border w-fit shadow-sm overflow-x-auto whitespace-nowrap max-w-full">
       <button onClick={() => setCurrentSection('root')} className={`hover:text-blue-600 flex items-center ${currentSection === 'root' ? 'font-bold text-gray-900' : ''}`}>
         <Home size={14} className="mr-2"/> Головна
       </button>
@@ -326,6 +325,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
     </div>
   );
 
+  // ... (Handlers remain same) ...
   const handleOpenWipModal = (task: Task, mode: 'add' | 'deduct') => {
       setWipSelectedTask(task);
       setWipModalMode(mode);
@@ -536,7 +536,6 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
   const handleOpenMapModal = () => { setEditingMapId(null); setNewMapName(''); setNewMapMachine(''); setNewMapProductId(''); setNewMapDrawingId(''); setNewMapComponents([]); setNewMapBlocks([]); setIsMapModalOpen(true); };
   
   const addComponentRequirement = () => { 
-      // Default empty structure for manual entry
       setNewMapComponents([...newMapComponents, { sourceStageIndex: 0, ratio: 1, name: '', qty: 1 }]); 
   };
   const removeComponentRequirement = (index: number) => { const updated = [...newMapComponents]; updated.splice(index, 1); setNewMapComponents(updated); };
@@ -551,11 +550,9 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
     if (isUploading) return;
     setIsUploading(true);
     
-    // 🔥 CLEAN AND VALIDATE COMPONENTS
     const cleanComponents = newMapComponents.map(comp => ({
-        name: comp.name, // "Етап №1"
-        qty: Number(comp.qty || comp.ratio || 0), // 5
-        // Keep sourceStageIndex/ratio for legacy/fallback if needed, but prioritize name/qty
+        name: comp.name,
+        qty: Number(comp.qty || comp.ratio || 0),
         sourceStageIndex: comp.sourceStageIndex || 0,
         ratio: Number(comp.qty || comp.ratio || 0)
     })).filter(c => c.name && c.qty > 0);
@@ -572,7 +569,6 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
         drawingId: newMapDrawingId, 
         drawingUrl: selectedDrawing?.photo, 
         drawingName: selectedDrawing?.name, 
-        // We do not have programNumber in state here, passing null
         programNumber: null, 
         inputComponents: cleanComponents 
     };
@@ -630,7 +626,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
   return (
     <div className="p-8 h-full flex flex-col">
         {/* Top Tab Switcher */}
-        <div className="flex bg-gray-100 p-1 rounded-xl w-fit mb-6 shadow-sm border border-gray-200">
+        <div className="flex bg-gray-100 p-1 rounded-xl w-full md:w-fit mb-6 shadow-sm border border-gray-200 overflow-x-auto whitespace-nowrap">
             {(isSuperAdmin || canView('products_catalog')) && (
                 <button onClick={() => setActiveMainTab('catalog')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all flex items-center ${activeMainTab === 'catalog' ? 'bg-white shadow text-slate-900' : 'text-gray-500 hover:text-gray-700'}`}>
                     <Box size={16} className="mr-2"/> Каталог Виробів
@@ -693,30 +689,59 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                 {/* Sub-section rendering ... */}
                 {currentSection !== 'root' && (
                     <div className="flex-1 flex flex-col overflow-hidden animate-fade-in">
-                        <div className="flex justify-between items-center mb-6">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-3">
                             {renderBreadcrumbs()}
                             {currentSection === 'finished' && (
                                 <div className="flex gap-3">
-                                    <div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/><input placeholder="Пошук виробів..." className="pl-9 pr-4 py-2 border rounded-lg w-64 text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
-                                    <button onClick={handleOpenProductModal} className="bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center hover:bg-slate-800 transition-colors shadow-lg"><Plus size={18} className="mr-2"/> Додати виріб</button>
+                                    <div className="relative">
+                                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
+                                        <input 
+                                            placeholder="Пошук виробів..." 
+                                            className="pl-9 pr-4 py-2 border rounded-lg w-full md:w-64 text-sm" 
+                                            value={searchTerm} 
+                                            onChange={e => setSearchTerm(e.target.value)} 
+                                        />
+                                    </div>
+                                    <button onClick={handleOpenProductModal} className="bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center hover:bg-slate-800 transition-colors shadow-lg whitespace-nowrap"><Plus size={18} className="mr-2"/> Додати виріб</button>
                                 </div>
                             )}
                             {currentSection === 'drawings' && (
-                                <button onClick={() => setIsDrawingModalOpen(true)} className="bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center hover:bg-slate-800 transition-colors shadow-lg"><Plus size={18} className="mr-2"/> Додати креслення</button>
+                                <div className="flex gap-3">
+                                    <div className="relative">
+                                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
+                                        <input 
+                                            placeholder="Пошук креслень..." 
+                                            className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg w-full md:w-64 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all" 
+                                            value={searchTerm} 
+                                            onChange={e => setSearchTerm(e.target.value)} 
+                                        />
+                                    </div>
+                                    <button onClick={() => setIsDrawingModalOpen(true)} className="bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center hover:bg-slate-800 transition-colors shadow-lg font-bold text-sm whitespace-nowrap">
+                                        <Plus size={18} className="mr-2"/> Додати креслення
+                                    </button>
+                                </div>
                             )}
                             {currentSection === 'setup_maps' && (
-                                <button onClick={handleOpenMapModal} className="bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center hover:bg-slate-800 transition-colors shadow-lg"><Plus size={18} className="mr-2"/> Створити карту</button>
+                                <button onClick={handleOpenMapModal} className="bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center hover:bg-slate-800 transition-colors shadow-lg whitespace-nowrap"><Plus size={18} className="mr-2"/> Створити карту</button>
                             )}
                             {currentSection === 'warehouse' && (
                                 <div className="flex gap-3">
-                                    <div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/><input placeholder="Пошук по складу..." className="pl-9 pr-4 py-2 border rounded-lg w-64 text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
-                                    <button onClick={() => setIsAddItemModalOpen(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-green-700 transition-colors shadow-lg"><Plus size={18} className="mr-2"/> Поповнити склад</button>
+                                    <div className="relative">
+                                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
+                                        <input 
+                                            placeholder="Пошук по складу..." 
+                                            className="pl-9 pr-4 py-2 border rounded-lg w-full md:w-64 text-sm" 
+                                            value={searchTerm} 
+                                            onChange={e => setSearchTerm(e.target.value)} 
+                                        />
+                                    </div>
+                                    <button onClick={() => setIsAddItemModalOpen(true)} className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-green-700 transition-colors shadow-lg whitespace-nowrap"><Plus size={18} className="mr-2"/> Поповнити склад</button>
                                 </div>
                             )}
                             {currentSection === 'defects' && (
                                 <div className="flex gap-3">
                                     {selectedDefectIds.size > 0 && (
-                                        <button onClick={() => setIsWriteOffModalOpen(true)} className="bg-red-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-red-700 transition-colors shadow-lg animate-pulse">
+                                        <button onClick={() => setIsWriteOffModalOpen(true)} className="bg-red-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-red-700 transition-colors shadow-lg animate-pulse whitespace-nowrap">
                                             <Trash2 size={18} className="mr-2"/> Списати обране ({selectedDefectIds.size})
                                         </button>
                                     )}
@@ -726,7 +751,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
 
                         {/* SUB-COMPONENT CONTENT */}
                         {currentSection === 'finished' && (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 overflow-y-auto">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 overflow-y-auto p-1">
                                 {products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.sku.toLowerCase().includes(searchTerm.toLowerCase())).map(product => (
                                     <div key={product.id} className="bg-white rounded-xl border p-4 shadow-sm hover:shadow-md transition-all group relative">
                                         {product.colorTag && (<div className="absolute top-3 right-3 w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: product.colorTag }}></div>)}
@@ -745,8 +770,8 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                         )}
 
                         {currentSection === 'drawings' && (
-                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6 overflow-y-auto">
-                                {drawings.map(drawing => (
+                            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6 overflow-y-auto p-1">
+                                {drawings.filter(d => d.name.toLowerCase().includes(searchTerm.toLowerCase())).map(drawing => (
                                     <div key={drawing.id} className="bg-white rounded-xl border p-4 shadow-sm hover:shadow-md transition-all group relative">
                                         <div className="aspect-[3/4] bg-gray-100 rounded-lg mb-3 overflow-hidden border relative cursor-pointer" onClick={() => setEnlargedImage(drawing.photo)}>
                                             {drawing.photo ? <img src={drawing.photo} className="w-full h-full object-contain p-2"/> : <FileText className="m-auto text-gray-300"/>}
@@ -760,8 +785,8 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                         {/* WAREHOUSE SECTION RENDER */}
                         {currentSection === 'warehouse' && (
                             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex-1 flex flex-col">
-                                <div className="overflow-y-auto flex-1">
-                                    <table className="w-full text-sm text-left">
+                                <div className="overflow-x-auto flex-1">
+                                    <table className="w-full text-sm text-left min-w-[600px]">
                                         <thead className="bg-gray-50 text-gray-500 font-medium border-b sticky top-0 z-10">
                                             <tr>
                                                 <th className="px-6 py-3">Виріб</th>
@@ -797,8 +822,8 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                         
                         {currentSection === 'defects' && (
                             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex-1 flex flex-col">
-                                <div className="overflow-y-auto flex-1">
-                                    <table className="w-full text-sm text-left">
+                                <div className="overflow-x-auto flex-1">
+                                    <table className="w-full text-sm text-left min-w-[800px]">
                                         <thead className="bg-gray-50 text-gray-500 font-medium border-b sticky top-0 z-10">
                                             <tr>
                                                 <th className="px-4 py-3 w-10">
@@ -844,7 +869,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                         )}
                         
                         {currentSection === 'setup_maps' && (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto p-1">
                                 {setupMaps.map(map => {
                                     const linkedProduct = products.find(p => p.id === map.productCatalogId);
                                     const componentsCount = map.inputComponents?.length || 0;
@@ -902,8 +927,8 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                 </div>
 
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex-1 flex flex-col">
-                    <div className="overflow-y-auto flex-1">
-                        <table className="w-full text-sm text-left">
+                    <div className="overflow-x-auto flex-1">
+                        <table className="w-full text-sm text-left min-w-[800px]">
                             <thead className="bg-gray-50 text-gray-500 font-medium border-b sticky top-0 z-10">
                                 <tr>
                                     <th className="p-4">Замовлення</th>
@@ -988,7 +1013,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
       {/* WIP MANUAL STOCK MODAL */}
       {isWipModalOpen && wipSelectedTask && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+              <div className="bg-white rounded-xl shadow-2xl w-[95%] md:w-full md:max-w-sm p-6 m-4 md:m-0">
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="font-bold text-lg">
                           {wipModalMode === 'add' ? 'Додати залишок' : 'Списати / Брак'}
@@ -1066,14 +1091,14 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
       {/* 3. PRODUCT MODAL */}
       {isProductModalOpen && (
            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-y-auto max-h-[90vh]">
+              <div className="bg-white rounded-xl shadow-2xl w-[95%] md:w-full md:max-w-lg overflow-y-auto max-h-[90vh] m-4 md:m-0">
                  <div className="px-6 py-4 border-b flex justify-between items-center">
                     <h3 className="font-bold text-lg">{editingProductId ? 'Редагувати виріб' : 'Новий виріб'}</h3>
                     <button onClick={() => setIsProductModalOpen(false)}><X size={20} className="text-gray-400 hover:text-gray-600"/></button>
                  </div>
                  <div className="p-6 space-y-4">
                     <div className="flex items-center gap-4 mb-4">
-                        <div className="w-24 h-24 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center relative overflow-hidden group hover:border-blue-400 transition-colors">
+                        <div className="w-24 h-24 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center relative overflow-hidden group hover:border-blue-400 transition-colors shrink-0">
                             {prodPhoto ? <img src={prodPhoto} className="w-full h-full object-cover" /> : <div className="text-center p-2"><ImageIcon className="w-8 h-8 text-gray-300 mx-auto mb-1" /><span className="text-[9px] text-gray-400 block leading-tight">Завантажити фото</span></div>}
                             <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileSelect} />
                         </div>
@@ -1109,7 +1134,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
       {/* 4. DRAWING MODAL */}
       {isDrawingModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+                    <div className="bg-white rounded-xl shadow-2xl w-[95%] md:w-full md:max-w-sm p-6 m-4 md:m-0">
                         <h3 className="font-bold text-lg mb-4">Нове креслення</h3>
                         <div className="space-y-4">
                             <div>
@@ -1134,7 +1159,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
       {/* 5. ADD TO STOCK MODAL */}
       {isAddItemModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-md p-6 m-4 md:m-0">
                   <h3 className="font-bold text-lg mb-4">Додати позицію на склад</h3>
                   <div className="space-y-4">
                       <div>
@@ -1178,7 +1203,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
       {/* 6. STOCK OPERATION MODAL */}
       {isStockModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-sm p-6 m-4 md:m-0">
                   <h3 className="font-bold text-lg mb-4">{stockOpType === 'add' ? 'Прихід товару' : 'Переміщення / Списання'}</h3>
                   <div className="space-y-4">
                       <div>
@@ -1206,7 +1231,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
       {/* 7. WRITE OFF MODAL */}
       {isWriteOffModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[80vh] overflow-y-auto">
+              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-lg p-6 max-h-[80vh] overflow-y-auto m-4 md:m-0">
                   <h3 className="font-bold text-lg mb-4">Списання браку</h3>
                   <div className="space-y-2 mb-4">
                       {Array.from(selectedDefectIds).map((id: string) => {
@@ -1244,7 +1269,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
       {/* 8. SETUP MAP MODAL (Included fully) */}
       {isMapModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
+              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-2xl p-6 max-h-[90vh] overflow-y-auto m-4 md:m-0">
                   <div className="flex justify-between items-center mb-4">
                       <h3 className="font-bold text-lg">{editingMapId ? 'Редагувати карту' : 'Створити карту наладки'}</h3>
                       <button onClick={() => setIsMapModalOpen(false)}><X size={20} className="text-gray-400 hover:text-gray-600"/></button>

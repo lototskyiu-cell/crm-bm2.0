@@ -10,12 +10,26 @@ interface NotificationBellProps {
   variant?: 'default' | 'dark';
 }
 
+const playNotificationSound = () => {
+  try {
+    const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    audio.volume = 0.5;
+    audio.play().catch(e => console.warn('Sound play blocked by browser policy', e));
+  } catch (e) {
+    console.warn('Sound playback error', e);
+  }
+};
+
 export const NotificationBell: React.FC<NotificationBellProps> = ({ currentUser, variant = 'default' }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  
+  // Logic to prevent sound on first load and track changes
+  const prevUnreadCountRef = useRef(0);
+  const isFirstSnapshot = useRef(true);
 
   // 1. DATA FETCHING (Real-time with Server-Side Filtering)
   useEffect(() => {
@@ -54,6 +68,22 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ currentUser,
             
             // Count unread
             const unread = fetchedNotes.filter((n) => !n.read).length;
+            
+            // --- Sound Logic ---
+            if (isFirstSnapshot.current) {
+                isFirstSnapshot.current = false;
+            } else {
+                if (unread > prevUnreadCountRef.current) {
+                    const storedSound = localStorage.getItem('soundEnabled');
+                    const isSoundEnabled = storedSound === null ? true : storedSound === 'true';
+                    if (isSoundEnabled) {
+                        playNotificationSound();
+                    }
+                }
+            }
+            prevUnreadCountRef.current = unread;
+            // -------------------
+
             setUnreadCount(unread);
             setError(null);
         } catch (err) {

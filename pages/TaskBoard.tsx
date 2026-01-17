@@ -136,6 +136,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
   const [techDocs, setTechDocs] = useState<{setupMap: SetupMap | null, productDrawingUrl: string | null}>({ setupMap: null, productDrawingUrl: null });
   const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
 
+  // ... (useEffects remain same) ...
   useEffect(() => {
     let unsubscribeTasks: () => void;
     let unsubscribeOrders: () => void;
@@ -218,6 +219,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
   const inProgressTasks = activeTasks.filter(t => t.status === 'in_progress');
   const doneTasks = activeTasks.filter(t => t.status === 'done');
 
+  // ... (Event Handlers remain same) ...
   const handleOrderChange = async (orderId: string) => {
     setSelectedOrderId(orderId);
     const order = orders.find(o => o.id === orderId);
@@ -226,12 +228,10 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
     setStageQuantities({});
     
     if (order) {
-       // Init default quantities
        if (order.workCycleId) {
            try {
                const cycle = await API.getWorkStorageItem(order.workCycleId) as JobCycle;
                setSelectedCycle(cycle);
-               // Initialize stage quantities with order total
                const initQty: Record<string, number> = {};
                cycle.stages.forEach(s => {
                    initQty[s.id] = order.quantity;
@@ -242,7 +242,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                setSelectedCycle(undefined);
            }
        } else {
-           // Fallback
            const product = store.getProduct(order.productId);
            if (product && product.jobCycleId) {
               const cycle = store.getCycle(product.jobCycleId);
@@ -460,11 +459,10 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
       }
   };
 
-  // Helper for Modal Archive Action
   const handleArchiveFromModal = async () => {
       if (editingTaskId && isEditor) {
           setArchiveConfirmId(editingTaskId);
-          setIsModalOpen(false); // Close edit modal, confirm modal will open
+          setIsModalOpen(false); 
       }
   };
 
@@ -523,7 +521,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
   };
 
   const handleDragStart = (e: React.DragEvent, taskId: string) => {
-    if (!isEditor) return; // Prevent drag if not editor
+    if (!isEditor) return; 
     setDraggedTaskId(taskId);
     e.dataTransfer.effectAllowed = 'move';
   };
@@ -540,12 +538,10 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
 
     const task = tasks.find(t => t.id === draggedTaskId);
     if (task && task.status !== newStatus) {
-      // Optimistic
       setTasks(prevTasks => prevTasks.map(t => t.id === draggedTaskId ? { ...t, status: newStatus } : t));
       try {
         await API.updateTaskStatus(draggedTaskId, newStatus);
         
-        // --- TRIGGER ADMIN NOTIFICATION (Status Change) ---
         await API.sendNotification(
             'admin',
             `Статус змінено: ${task.title} -> ${newStatus.toUpperCase()}`,
@@ -562,7 +558,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
     setDraggedTaskId(null);
   };
 
-  // ... (Rest of UI rendering remains unchanged) ...
   if (isLoading) return <div className="p-8 flex justify-center"><Loader className="animate-spin text-blue-600"/></div>;
 
   const renderCard = (task: Task, isArchiveView: boolean = false, onArchive?: (id: string) => void) => {
@@ -594,7 +589,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
              {task.priority === 'high' ? 'Високий' : task.priority === 'medium' ? 'Середній' : 'Низький'}
            </div>
            
-           {/* Action Buttons - Protected by isEditor */}
            {isEditor && (
                <div className="flex items-center gap-1 relative z-10">
                   {!isArchiveView && (
@@ -720,9 +714,9 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
 
     return (
       <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-        <div className="bg-white w-full max-w-5xl h-[90vh] rounded-2xl flex overflow-hidden shadow-2xl animate-scale-up">
+        <div className="bg-white w-[98%] md:w-full md:max-w-5xl h-[90vh] rounded-2xl flex flex-col md:flex-row overflow-hidden shadow-2xl animate-scale-up m-4 md:m-0">
           
-          <div className="w-1/3 bg-gray-50 border-r border-gray-200 p-6 flex flex-col overflow-y-auto">
+          <div className="w-full md:w-1/3 bg-gray-50 border-r border-gray-200 p-6 flex flex-col overflow-y-auto">
              <div className="mt-2">
                <div className="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded w-fit mb-2 uppercase">{selectedTask.type === 'production' ? 'Виробниче завдання' : 'Просте завдання'}</div>
                <h2 className="text-2xl font-bold text-gray-900 mb-2">{selectedTask.title}</h2>
@@ -781,7 +775,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
              </div>
           </div>
 
-          <div className="w-2/3 p-6 overflow-y-auto bg-slate-50 relative">
+          <div className="w-full md:w-2/3 p-6 overflow-y-auto bg-slate-50 relative">
              <div className="flex justify-end mb-4 absolute top-6 right-6 z-10">
                 <button onClick={() => setSelectedTaskId(null)} className="p-2 bg-white rounded-full text-gray-400 hover:text-gray-900 shadow-md"><X size={24}/></button>
              </div>
@@ -800,7 +794,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                         </div>
                     </div>
 
-                    <div className={`grid ${gridCols} gap-6`}>
+                    <div className={`grid grid-cols-1 md:${gridCols} gap-6`}>
                         {/* Setup Photo */}
                         {showSetupPhoto && (
                             <div>
@@ -841,7 +835,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                                                 {block.toolNumber || idx + 1}
                                             </div>
                                             
-                                            {/* Tool Thumbnail */}
                                             {tool?.photo ? (
                                                 <img src={tool.photo} className="w-10 h-10 rounded object-cover border border-gray-200 mr-3 shadow-sm bg-white" />
                                             ) : (
@@ -926,10 +919,10 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
 
       <div className="flex-1 overflow-x-auto">
         {currentTab === 'active' ? (
-            <div className="flex space-x-6 min-w-[1000px] h-full">
+            <div className="flex flex-col md:flex-row md:space-x-6 min-w-[300px] md:min-w-[1000px] h-full gap-4 md:gap-0">
             {/* TODO COLUMN */}
             <div 
-                className="flex-1 bg-gray-100/50 rounded-2xl p-4 flex flex-col transition-colors"
+                className="flex-1 bg-gray-100/50 rounded-2xl p-4 flex flex-col transition-colors min-h-[200px]"
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, 'todo')}
             >
@@ -949,7 +942,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
 
             {/* IN PROGRESS COLUMN */}
             <div 
-                className="flex-1 bg-gray-100/50 rounded-2xl p-4 flex flex-col transition-colors"
+                className="flex-1 bg-gray-100/50 rounded-2xl p-4 flex flex-col transition-colors min-h-[200px]"
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, 'in_progress')}
             >
@@ -964,7 +957,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
 
             {/* DONE COLUMN */}
             <div 
-                className="flex-1 bg-gray-100/50 rounded-2xl p-4 flex flex-col transition-colors"
+                className="flex-1 bg-gray-100/50 rounded-2xl p-4 flex flex-col transition-colors min-h-[200px]"
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, 'done')}
             >
@@ -994,7 +987,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
 
       {isModalOpen && (
          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-2xl shadow-2xl w-[95%] md:w-full md:max-w-2xl max-h-[90vh] overflow-y-auto m-4 md:m-0">
                <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-center sticky top-0 bg-white z-10">
                   <h2 className="text-xl font-bold text-gray-900">{editingTaskId ? 'Редагувати завдання' : 'Створити завдання'}</h2>
                   <button onClick={() => setIsModalOpen(false)} className="bg-gray-100 p-2 rounded-full hover:bg-gray-200">
@@ -1003,6 +996,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                </div>
                
                <div className="p-6 space-y-6">
+                  {/* ... (Keep form logic same) */}
                   {!editingTaskId && (
                       <div className="flex bg-gray-100 p-1 rounded-xl">
                          <button 
@@ -1020,7 +1014,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                       </div>
                   )}
 
-                  {/* ... (Modal content for simple/production task forms remains unchanged) ... */}
                   {taskType === 'simple' ? (
                      <div className="space-y-4 animate-fade-in">
                         <div>
@@ -1090,8 +1083,8 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                                  <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Розподіл етапів (Створити завдання)</label>
                                  <div className="space-y-2">
                                     {selectedCycle.stages.map((stage, idx) => (
-                                       <div key={stage.id} className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
-                                          <div className="flex-1">
+                                       <div key={stage.id} className="flex flex-col md:flex-row items-start md:items-center justify-between p-3 bg-white rounded-lg border border-gray-200 gap-3 md:gap-0">
+                                          <div className="flex-1 w-full md:w-auto">
                                              <div className="text-sm font-bold flex items-center">
                                                  <span className="bg-slate-100 text-slate-600 w-5 h-5 rounded-full flex items-center justify-center text-[10px] mr-2">{idx + 1}</span>
                                                  {stage.name}
@@ -1100,17 +1093,17 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                                           </div>
                                           
                                           {/* PLAN QUANTITY INPUT */}
-                                          <div className="w-24 px-2">
-                                              <label className="text-[9px] uppercase font-bold text-gray-400 mb-0.5 block">План (шт)</label>
+                                          <div className="w-full md:w-24 px-0 md:px-2 flex items-center md:block justify-between">
+                                              <label className="text-[9px] uppercase font-bold text-gray-400 mb-0.5 block md:mb-1 mr-2 md:mr-0">План (шт)</label>
                                               <input 
                                                 type="number"
-                                                className="w-full p-1 border rounded text-center text-sm font-bold"
+                                                className="w-20 md:w-full p-1 border rounded text-center text-sm font-bold"
                                                 value={stageQuantities[stage.id] || 0}
                                                 onChange={(e) => handleStageQuantityChange(stage.id, Number(e.target.value))}
                                               />
                                           </div>
 
-                                          <div className="w-1/3">
+                                          <div className="w-full md:w-1/3">
                                               <MultiSelectUsers
                                                 users={users}
                                                 selectedIds={stageAssignments[stage.id] || []}

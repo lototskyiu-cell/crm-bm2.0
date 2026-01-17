@@ -4,7 +4,7 @@ import { User, TransportMode, RoleConfig, ModulePermission } from '../types';
 import { API } from '../services/api';
 import { uploadFileToCloudinary } from '../services/cloudinary';
 import { useTheme } from '../context/ThemeContext';
-import { Save, Car, Bus, User as UserIcon, Lock, Loader, AlertTriangle, Trash2, RefreshCw, X, Box, ClipboardList, ShoppingCart, Folder, Wrench, Shield, Check, Plus, CornerDownRight, Smartphone, Monitor, LayoutTemplate, Camera, Image as ImageIcon, Sun, Moon } from 'lucide-react';
+import { Save, Car, Bus, User as UserIcon, Lock, Loader, AlertTriangle, Trash2, RefreshCw, X, Box, ClipboardList, ShoppingCart, Folder, Wrench, Shield, Check, Plus, CornerDownRight, Smartphone, Monitor, LayoutTemplate, Camera, Image as ImageIcon, Sun, Moon, Bell } from 'lucide-react';
 
 interface SettingsProps {
   currentUser: User;
@@ -60,6 +60,9 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
 
   // View Mode
   const [viewMode, setViewMode] = useState<'desktop' | 'mobile' | 'auto'>('auto');
+  
+  // Notification Sound State
+  const [soundEnabled, setSoundEnabled] = useState(true);
 
   // Trash State
   const [activeTrashTab, setActiveTrashTab] = useState<TrashTab>('task');
@@ -93,6 +96,10 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
     loadUser();
     const storedViewMode = localStorage.getItem('app_view_mode') as 'desktop' | 'mobile' | 'auto';
     if (storedViewMode) setViewMode(storedViewMode);
+    
+    const storedSound = localStorage.getItem('soundEnabled');
+    // Default to true if not set
+    setSoundEnabled(storedSound === null ? true : storedSound === 'true');
   }, [currentUser]);
 
   // Sync photo preview when user loads
@@ -214,8 +221,9 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
   const handleSave = async () => {
     if (!user) return;
     try {
-      // Save View Mode
+      // Save View Mode & Sound
       localStorage.setItem('app_view_mode', viewMode);
+      localStorage.setItem('soundEnabled', String(soundEnabled));
       window.dispatchEvent(new Event('storage')); // Trigger update in App
 
       if (user.role === 'admin') {
@@ -444,6 +452,28 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
                     <p className="text-xs text-gray-400 dark:text-slate-500 mt-3 flex items-center">
                         <AlertTriangle size={12} className="mr-1"/>
                         Зміни інтерфейсу застосуються відразу.
+                    </p>
+                </div>
+            </div>
+
+            {/* NOTIFICATIONS SETTINGS */}
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden transition-colors">
+                <div className="p-4 bg-gray-50 dark:bg-slate-900/50 border-b border-gray-100 dark:border-slate-700 flex items-center">
+                    <Bell size={18} className="text-gray-500 dark:text-slate-400 mr-2" />
+                    <span className="font-bold text-gray-700 dark:text-slate-200">Сповіщення</span>
+                </div>
+                <div className="p-6">
+                    <label className="flex items-center cursor-pointer">
+                        <input 
+                            type="checkbox" 
+                            checked={soundEnabled} 
+                            onChange={e => setSoundEnabled(e.target.checked)} 
+                            className="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+                        />
+                        <span className="ml-3 text-sm font-medium text-gray-700 dark:text-slate-300">Увімкнути звук сповіщень</span>
+                    </label>
+                    <p className="text-xs text-gray-400 dark:text-slate-500 mt-2 ml-8">
+                        Програвати звуковий сигнал при отриманні нових замовлень або задач.
                     </p>
                 </div>
             </div>
