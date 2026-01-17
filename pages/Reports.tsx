@@ -2,9 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { API } from '../services/api';
 import { store } from '../services/mockStore'; 
-import { Task, ProductionReport, User, Order, JobCycle, SetupMap, SetupComponentRequirement } from '../types';
-import { CheckCircle, AlertCircle, FileText, Plus, Search, Calendar, X, Download, ArrowRight, CheckSquare, Square, Pencil, Loader, Save, Link, Package } from 'lucide-react';
-import { collection, query, where, getDocs, addDoc, serverTimestamp, updateDoc, doc, increment, writeBatch } from "firebase/firestore";
+import { Task, ProductionReport, User, Order } from '../types';
+import { CheckCircle, AlertCircle, FileText, Plus, Search, X, Download, ArrowRight, CheckSquare, Square, Pencil, Loader, Save, Link, Package } from 'lucide-react';
+import { collection, query, where, getDocs, writeBatch, doc, increment } from "firebase/firestore";
 import { db } from "../services/firebase";
 
 interface ReportsProps {
@@ -86,40 +86,26 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
           // Log object for debugging
           const selectedProduct = order ? { id: order.productId } : undefined;
 
-          console.log("🟢 1. Вибраний виріб (Order Product ID):", selectedProduct?.id); 
-          
           if (!selectedProduct) return;
 
           try {
-              console.log("🟡 2. Шукаємо карту наладки в колекції 'setup_cards'...");
-
-              // Query 'setup_cards' collection using 'productId' (which matches the requested query logic)
+              // Query 'setup_cards' collection using 'productId'
               const q = query(collection(db, 'setup_cards'), where('productId', '==', selectedProduct.id));
               let snapshot = await getDocs(q);
 
-              // Fallback query if 'productId' index is missing but 'productCatalogId' exists (legacy support)
+              // Fallback query if 'productId' index is missing but 'productCatalogId' exists
               if (snapshot.empty) {
-                 console.log("   -> Fallback: Trying productCatalogId...");
                  const q2 = query(collection(db, 'setup_cards'), where('productCatalogId', '==', selectedProduct.id));
                  snapshot = await getDocs(q2);
               }
 
-              console.log("🟠 3. Знайдено карт:", snapshot.size);
-
               if (!snapshot.empty) {
                   const cardData = snapshot.docs[0].data();
-                  console.log("🔵 4. Дані знайденої карти:", cardData); 
-
-                  // Check for inputComponents array
-                  // Fallback to legacy fields if needed, but prioritize inputComponents
                   // Use 'any' cast to access dynamic fields safely
                   const d = cardData as any;
                   const components = d.inputComponents || [];
 
                   if (components.length > 0) {
-                      console.log("🟣 5. У карти є компоненти (Збірка активна):", components);
-                      
-                      // Process Logic
                       const groups: ConsumptionGroup[] = [];
                       const reportQty = Number(qty) || 0;
 
@@ -128,7 +114,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                           const compName = comp.name || `Stage ${comp.sourceStageIndex !== undefined ? comp.sourceStageIndex + 1 : '?'}`;
                           
                           // Search for available batches (Approved, Has Qty, Matching Order, Matching Name)
-                          // IMPORTANT: Matching Name logic relies on previous reports having taskTitle or stageName equal to the component Name
                           const available = reports.filter(r => 
                               r.status === 'approved' &&
                               (r.quantity - (r.usedQuantity || 0)) > 0 &&
@@ -138,8 +123,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                                 (r.taskTitle && r.taskTitle.trim() === compName.trim())
                               )
                           );
-
-                          console.log(`🔎 6. Для компонента "${compName}" знайдено партій:`, available.length);
 
                           groups.push({
                               name: compName,
@@ -151,15 +134,10 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                           });
                       }
                       setConsumptionGroups(groups);
-
-                  } else {
-                      console.log("⚪ 6. У карти немає вхідних компонентів (звичайне виробництво, не збірка).");
                   }
-              } else {
-                  console.warn("❌ Карти наладки для цього виробу не знайдено в базі setup_cards.");
               }
           } catch (error) {
-              console.error("⛔ ПОМИЛКА ПОШУКУ КАРТИ:", error);
+              console.error("Consumption Calc Error:", error);
           }
       };
       
@@ -269,26 +247,20 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
         // Commit all changes
         await batchWrite.commit();
 
-        // 4. Send Notification (Non-blocking)
+        // 4. Send Notification (Fixed Logic: Use target='admin')
         try {
             const workerName = currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'Працівник';
             const taskTitle = task?.title || 'Завдання';
             const message = `Новий звіт від ${workerName}: ${taskTitle} (${qty} шт)`;
             
-            const q = query(collection(db, "users"), where("role", "==", "admin"));
-            const querySnapshot = await getDocs(q);
-            
-            const notifPromises = querySnapshot.docs.map(adminDoc => {
-                return addDoc(collection(db, "notifications"), {
-                    userId: adminDoc.id,
-                    type: 'report_submitted',
-                    message: message,
-                    read: false,
-                    createdAt: serverTimestamp(),
-                    linkId: reportRef.id
-                });
-            });
-            await Promise.all(notifPromises);
+            await API.sendNotification(
+                'admin', // Generic ID
+                message,
+                'report_submitted',
+                reportRef.id,
+                'admin', // TARGET: ADMIN
+                'Новий звіт'
+            );
         } catch (notifError: any) {
             console.error("Notification Error:", notifError);
         }
@@ -383,8 +355,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
     const newScrap = Number(value);
     if (newScrap < 0) return;
     setEditScrap(value);
-    // Auto-adjust quantity to maintain total if desired, OR just let user edit freely. 
-    // Here we maintain the 'produced' amount logic: if I made 10 and found 1 scrap, then 9 good.
+    // Auto-adjust quantity to maintain total if desired
     let newQty = editLockedTotal - newScrap;
     if (newQty < 0) newQty = 0;
     setEditQty(newQty.toString());
@@ -432,8 +403,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
   };
 
   const handleExportExcel = () => {
-    // Logic for exporting selectedReportIds or filteredHistory to CSV
-    // (Implementation omitted for brevity, similar to existing)
     const itemsToExport = selectedReportIds.size > 0 
         ? reports.filter(r => selectedReportIds.has(r.id))
         : filteredHistory;
@@ -582,7 +551,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                       </div>
                    </div>
 
-                   {/* 🔥 CONSUMPTION LOGIC BLOCK */}
+                   {/* CONSUMPTION LOGIC BLOCK */}
                    {consumptionGroups.length > 0 && Number(qty) > 0 && (
                        <div className="space-y-3 animate-fade-in">
                            {consumptionGroups.map((group, gIdx) => (
@@ -800,7 +769,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
         </div>
       </div>
 
-      {/* EDIT MODAL (Unchanged) */}
+      {/* EDIT MODAL */}
       {isEditModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
              <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">

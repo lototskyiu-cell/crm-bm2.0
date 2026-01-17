@@ -1,3 +1,4 @@
+
 import { 
   User, WorkSchedule, Order, Task, JobCycle, JobFolder, 
   Product, Drawing, SetupMap, Tool, ToolFolder, 
@@ -251,6 +252,9 @@ class MockStoreService {
   moveToolFolder(id: string, newParentId: string | null) {
       const f = this.toolFolders.find(fol => fol.id === id);
       if (f) f.parentId = newParentId;
+  }
+  deleteToolFolder(id: string) {
+      this.toolFolders = this.toolFolders.filter(f => f.id !== id);
   }
 
   getWarehouseItems(folderId: string | null) { return this.warehouse.filter(w => w.folderId === folderId && !w.deletedAt); }

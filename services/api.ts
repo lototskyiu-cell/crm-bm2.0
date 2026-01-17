@@ -1,4 +1,3 @@
-
 import { db } from "./firebase";
 import { 
   collection, 
@@ -17,7 +16,7 @@ import {
   Timestamp,
   updateDoc
 } from "firebase/firestore";
-import { User, AttendanceRecord, WorkSchedule, Order, Task, Product, ProductStock, DefectItem, SetupMap, Drawing, Tool, JobFolder, JobCycle, Notification, ProductionReport, RoleConfig } from "../types";
+import { User, AttendanceRecord, WorkSchedule, Order, Task, Product, ProductStock, DefectItem, SetupMap, Drawing, Tool, JobFolder, JobCycle, Notification, ProductionReport, RoleConfig, ToolFolder, WarehouseItem, ProductionItem, ToolTransaction, JobStage } from "../types";
 import { PayrollService } from "./payroll";
 
 const USERS_COLLECTION = "users";
@@ -58,7 +57,6 @@ const sanitizeForFirestore = (obj: any) => {
   return JSON.parse(JSON.stringify(obj));
 };
 
-// Explicitly define the object first
 const ApiService = {
   // --- ADMIN AUTH & SETTINGS ---
   
@@ -283,15 +281,106 @@ const ApiService = {
     }
   },
 
+  // --- ATTENDANCE ---
+
+  async getAttendanceRecords(userId?: string, date?: Date | string): Promise<AttendanceRecord[]> {
+    try {
+      let q = query(collection(db, ATTENDANCE_COLLECTION));
+      if (userId) {
+        q = query(q, where("userId", "==", userId));
+      }
+      
+      // If date is string YYYY-MM-DD
+      if (typeof date === 'string') {
+         q = query(q, where("date", "==", date));
+      }
+      
+      const snapshot = await getDocs(q);
+      let records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecord));
+      
+      // If date is Date object (Month filter), filter client side to avoid complex index
+      if (date instanceof Date) {
+          const targetMonth = date.getMonth();
+          const targetYear = date.getFullYear();
+          records = records.filter(r => {
+              const rDate = new Date(r.date);
+              return rDate.getMonth() === targetMonth && rDate.getFullYear() === targetYear;
+          });
+      }
+      return records;
+    } catch (e) {
+      handleFirestoreError(e, 'getAttendanceRecords');
+      return [];
+    }
+  },
+
+  async saveAttendanceRecord(record: AttendanceRecord, user: User, schedules: WorkSchedule[]): Promise<void> {
+    try {
+        const data = sanitizeForFirestore(record);
+        if (record.id && !record.id.startsWith('rec_temp')) {
+            await setDoc(doc(db, ATTENDANCE_COLLECTION, record.id), data, { merge: true });
+        } else {
+            await addDoc(collection(db, ATTENDANCE_COLLECTION), data);
+        }
+    } catch (e) {
+        handleFirestoreError(e, 'saveAttendanceRecord');
+        throw e;
+    }
+  },
+
+  async deleteAttendanceRecord(id: string): Promise<void> {
+      try {
+          await deleteDoc(doc(db, ATTENDANCE_COLLECTION, id));
+      } catch (e) {
+          handleFirestoreError(e, 'deleteAttendanceRecord');
+          throw e;
+      }
+  },
+
+  // --- WORK SCHEDULES ---
+
+  async getSchedules(): Promise<WorkSchedule[]> {
+      try {
+          const snap = await getDocs(collection(db, SCHEDULES_COLLECTION));
+          return snap.docs.map(d => ({id: d.id, ...d.data()} as WorkSchedule));
+      } catch (e) {
+          handleFirestoreError(e, 'getSchedules');
+          return [];
+      }
+  },
+
+  async saveSchedule(schedule: WorkSchedule): Promise<void> {
+      try {
+          const data = sanitizeForFirestore(schedule);
+          if (schedule.id && !schedule.id.startsWith('sch_')) {
+              await setDoc(doc(db, SCHEDULES_COLLECTION, schedule.id), data, { merge: true });
+          } else {
+              await addDoc(collection(db, SCHEDULES_COLLECTION), data);
+          }
+      } catch (e) {
+          handleFirestoreError(e, 'saveSchedule');
+          throw e;
+      }
+  },
+
+  async deleteSchedule(id: string): Promise<void> {
+      try {
+          await deleteDoc(doc(db, SCHEDULES_COLLECTION, id));
+      } catch (e) {
+          handleFirestoreError(e, 'deleteSchedule');
+          throw e;
+      }
+  },
+
   // --- NOTIFICATIONS ---
 
   subscribeToNotifications(userId: string, callback: (notifications: Notification[]) => void): () => void {
-    // FIX: Removed 'orderBy' from query to prevent Firestore Index Error.
-    // Sorting is now handled client-side in the snapshot listener.
+    // Note: We avoid 'where' clauses here to prevent index errors and allow client-side filtering 
+    // for complex logic (like "Target Admin OR My ID")
     const q = query(
       collection(db, NOTIFICATIONS_COLLECTION), 
-      where("userId", "==", userId),
-      where("read", "==", false)
+      orderBy('createdAt', 'desc'),
+      // limit(50) // Optional limit if needed
     );
     
     return onSnapshot(q, (snapshot) => {
@@ -300,31 +389,22 @@ const ApiService = {
         ...doc.data()
       } as Notification));
 
-      // Client-side sort: Newest first
-      notifications.sort((a: any, b: any) => {
-          const getMillis = (item: any) => {
-              if (!item.createdAt) return Date.now(); // Handle local pending writes
-              if (typeof item.createdAt.toMillis === 'function') return item.createdAt.toMillis();
-              if (item.createdAt.seconds) return item.createdAt.seconds * 1000;
-              return 0;
-          };
-          return getMillis(b) - getMillis(a);
-      });
-
       callback(notifications);
     }, (error) => handleFirestoreError(error, 'subscribeToNotifications'));
   },
 
-  async sendNotification(userId: string, message: string, type: string = 'info', linkId?: string): Promise<void> {
+  async sendNotification(userId: string, message: string, type: string = 'info', linkId?: string, target?: 'admin' | 'user' | 'global', title?: string): Promise<void> {
     try {
       const payload: any = {
         userId,
         message,
         type,
         read: false,
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
       };
       if (linkId) payload.linkId = linkId;
+      if (target) payload.target = target;
+      if (title) payload.title = title;
 
       await addDoc(collection(db, NOTIFICATIONS_COLLECTION), payload);
     } catch (error) {
@@ -574,7 +654,9 @@ const ApiService = {
                     colorTag: data.colorTag,
                     unit: data.unit,
                     description: data.description,
-                    deleted: data.deleted
+                    deleted: data.deleted,
+                    jobCycleId: data.jobCycleId,
+                    drawingId: data.drawingId
                 } as Product & { deleted?: boolean };
             })
             .filter(p => !p.deleted);
@@ -624,7 +706,9 @@ const ApiService = {
             colorTag: data.colorTag,
             unit: data.unit,
             description: data.description,
-            deleted: data.deleted
+            deleted: data.deleted,
+            jobCycleId: data.jobCycleId,
+            drawingId: data.drawingId
             } as Product & { deleted?: boolean };
         })
         .filter(p => !p.deleted);
@@ -642,6 +726,8 @@ const ApiService = {
         photoUrl: product.photo || '',
         colorTag: product.colorTag || '#3b82f6',
         description: product.description || '',
+        jobCycleId: product.jobCycleId || null,
+        drawingId: product.drawingId || null,
         deleted: false
       };
 
@@ -744,6 +830,15 @@ const ApiService = {
           await deleteDoc(doc(db, TOOL_CATALOG_COLLECTION, id));
       } catch (error) {
           handleFirestoreError(error, 'deleteTool');
+          throw error;
+      }
+  },
+
+  async deleteToolFolder(id: string): Promise<void> {
+      try {
+          await deleteDoc(doc(db, TOOL_CATALOG_COLLECTION, id));
+      } catch (error) {
+          handleFirestoreError(error, 'deleteToolFolder');
           throw error;
       }
   },
@@ -851,7 +946,7 @@ const ApiService = {
                 workerName: data.workerName,
                 stageName: data.stageName, // Map stageName
                 date: data.date,
-                imageUrl: data.imageUrl // Specific drawing/photo
+                imageUrl: data.imageUrl // Specific drawing/photo for the defect
             } as DefectItem;
         });
         callback(items);
@@ -882,8 +977,6 @@ const ApiService = {
 
   async scrapDefect(id: string, quantity: number, historyData?: { productName: string, sku: string, userName: string, date: string, stageName?: string, workerName?: string }): Promise<void> {
       try {
-          // Adjust logic for log-based defects: We probably just decrease quantity or delete if 0?
-          // For now, decrement quantity is safest.
           const docRef = doc(db, DEFECTS_COLLECTION, id);
           await setDoc(docRef, { quantity: increment(-quantity) }, { merge: true });
 
@@ -924,8 +1017,12 @@ const ApiService = {
           type: data.type || 'production',
           createdAt: data.createdAt,
           usedQuantity: data.usedQuantity || 0,
-          // Mapped Batch Code
-          batchCode: data.batchCode || null
+          batchCode: data.batchCode || null,
+          sourceBatchIds: data.sourceBatchIds || [],
+          taskTitle: data.taskTitle,
+          orderNumber: data.orderNumber,
+          stageName: data.stageName,
+          productName: data.productName
         } as ProductionReport;
       });
       callback(reports);
@@ -934,7 +1031,6 @@ const ApiService = {
 
   async createReport(report: ProductionReport): Promise<string> {
     try {
-      // 1. Save Report
       const docRef = await addDoc(collection(db, REPORTS_COLLECTION), {
         taskId: report.taskId,
         userId: report.userId,
@@ -946,10 +1042,11 @@ const ApiService = {
         type: report.type || 'production',
         createdAt: report.createdAt || new Date().toISOString(),
         usedQuantity: 0,
-        batchCode: report.batchCode || null
+        batchCode: report.batchCode || null,
+        sourceBatchIds: report.sourceBatchIds || []
       });
 
-      // 2. Increment Pending on Task if normal production
+      // Increment Pending on Task if normal production
       if (report.status === 'pending') {
           const taskRef = doc(db, TASKS_COLLECTION, report.taskId);
           await updateDoc(taskRef, {
@@ -966,7 +1063,6 @@ const ApiService = {
 
   async addManualStock(taskId: string, quantity: number, adminName: string): Promise<void> {
       try {
-          // 1. Create Report directly as Approved
           const report: ProductionReport = {
               id: '',
               taskId,
@@ -981,13 +1077,12 @@ const ApiService = {
               usedQuantity: 0
           };
           
-          const docRef = await addDoc(collection(db, REPORTS_COLLECTION), {
+          await addDoc(collection(db, REPORTS_COLLECTION), {
               ...report,
-              status: 'approved', // Explicit
+              status: 'approved', 
               type: 'manual_stock'
           });
 
-          // 2. Update Task Progress (Atomic)
           const taskRef = doc(db, TASKS_COLLECTION, taskId);
           await updateDoc(taskRef, {
               factQuantity: increment(quantity)
@@ -999,609 +1094,180 @@ const ApiService = {
       }
   },
 
-  async updateReport(id: string, updates: Partial<ProductionReport>): Promise<void> {
-    try {
-        const ref = doc(db, REPORTS_COLLECTION, id);
-        // We do not change status here, only content
-        await updateDoc(ref, {
-            quantity: updates.quantity,
-            scrapQuantity: updates.scrapQuantity,
-            notes: updates.notes
-        });
-    } catch (error) {
-        handleFirestoreError(error, 'updateReport');
-        throw error;
-    }
+  async updateReport(id: string, data: Partial<ProductionReport>): Promise<void> {
+      try {
+          await updateDoc(doc(db, REPORTS_COLLECTION, id), data);
+      } catch(e) { throw e; }
   },
 
-  async approveReport(reportId: string, report: ProductionReport): Promise<void> {
-    try {
-      console.log(`Approving Report: ${reportId}, Task: ${report.taskId}, Qty: ${report.quantity}`);
-
-      // 1. Approve Report
-      const reportRef = doc(db, REPORTS_COLLECTION, reportId);
-      await updateDoc(reportRef, { status: 'approved' });
-
-      // 2. Update Task Progress (Atomic)
-      const taskRef = doc(db, TASKS_COLLECTION, report.taskId);
-      const taskSnap = await getDoc(taskRef);
-      
-      if (!taskSnap.exists()) {
-          console.error("Task not found!");
-          return;
-      }
-      const taskData = taskSnap.data();
-
-      // Atomic increment
-      // Note: 'factQuantity' corresponds to completedQuantity in Firestore schema from saveTask
-      await updateDoc(taskRef, {
-        factQuantity: increment(Number(report.quantity)),
-        pendingQuantity: increment(-Number(report.quantity))
-      });
-
-      // Check Completion
-      const newCompleted = (taskData.factQuantity || 0) + Number(report.quantity);
-      if (newCompleted >= (taskData.planQuantity || 0)) {
-        await updateDoc(taskRef, { status: 'done' });
-      }
-
-      // 3. Create Defect Record (if exists)
-      if (report.scrapQuantity > 0) {
-        let productId = 'unknown';
-        let productName = taskData.title; 
-        let drawingUrl = null;
-
-        // Attempt to find product info via Order
-        if (taskData.orderId) {
-           const orderRef = doc(db, ORDERS_COLLECTION, taskData.orderId);
-           const orderSnap = await getDoc(orderRef);
-           if (orderSnap.exists()) {
-              const orderData = orderSnap.data();
-              if (orderData.productCatalogId) {
-                  productId = orderData.productCatalogId;
-                  
-                  // FIX: Explicitly fetch Product Name
-                  const productRef = doc(db, CATALOGS_COLLECTION, productId);
-                  const productSnap = await getDoc(productRef);
-                  if (productSnap.exists()) {
-                      productName = productSnap.data().name;
-                  }
-              }
-
-              // Fetch Cycle -> Stage -> Setup Map -> Drawing
-              if (orderData.workCycleId && taskData.stageId) {
-                  const cycleRef = doc(db, WORK_STORAGE_COLLECTION, orderData.workCycleId);
-                  const cycleSnap = await getDoc(cycleRef);
-                  if (cycleSnap.exists()) {
-                      const cycleData = cycleSnap.data() as JobCycle;
-                      const stage = cycleData.stages?.find((s: any) => s.id === taskData.stageId);
-                      
-                      if (stage && stage.setupMapId) {
-                          const setupMapRef = doc(db, SETUP_MAPS_COLLECTION, stage.setupMapId);
-                          const setupMapSnap = await getDoc(setupMapRef);
-                          if (setupMapSnap.exists()) {
-                              const setupMapData = setupMapSnap.data();
-                              drawingUrl = setupMapData.drawingUrl || setupMapData.photoUrl || null;
-                          }
-                      }
-                  }
-              }
-           }
-        }
-
-        // Fetch Worker Name
-        let workerName = "Unknown Worker";
-        if (report.userId) {
-            const userRef = doc(db, USERS_COLLECTION, report.userId);
-            const userSnap = await getDoc(userRef);
-            if (userSnap.exists()) {
-                const u = userSnap.data();
-                workerName = `${u.firstName} ${u.lastName}`;
-            }
-        }
-
-        // Use Task Title as Stage Name if available
-        const stageName = taskData.title || "Unknown Stage";
-
-        await addDoc(collection(db, DEFECTS_COLLECTION), {
-          productId: productId,
-          productName: productName,
-          quantity: Number(report.scrapQuantity),
-          reason: report.notes || "Reported during production",
-          workerName: workerName,
-          stageName: stageName, // Added stageName
-          date: serverTimestamp(),
-          sourceReportId: reportId,
-          imageUrl: drawingUrl // Save the specific stage drawing
-        });
-      }
-
-    } catch (error) {
-      handleFirestoreError(error, 'approveReport');
-      throw error;
-    }
+  async approveReport(id: string, report: ProductionReport): Promise<void> {
+      try {
+          await updateDoc(doc(db, REPORTS_COLLECTION, id), { status: 'approved' });
+          const taskRef = doc(db, TASKS_COLLECTION, report.taskId);
+          await updateDoc(taskRef, {
+              completedQuantity: increment(report.quantity),
+              pendingQuantity: increment(-report.quantity)
+          });
+      } catch(e) { throw e; }
   },
 
-  async rejectReport(reportId: string, report: ProductionReport): Promise<void> {
-    try {
-      const reportRef = doc(db, REPORTS_COLLECTION, reportId);
-      await updateDoc(reportRef, { status: 'rejected' });
+  async rejectReport(id: string, report: ProductionReport): Promise<void> {
+      try {
+          await updateDoc(doc(db, REPORTS_COLLECTION, id), { status: 'rejected' });
+          const taskRef = doc(db, TASKS_COLLECTION, report.taskId);
+          await updateDoc(taskRef, {
+              pendingQuantity: increment(-report.quantity)
+          });
+      } catch(e) { throw e; }
+  },
 
-      const taskRef = doc(db, TASKS_COLLECTION, report.taskId);
-      await updateDoc(taskRef, {
-        pendingQuantity: increment(-Number(report.quantity))
-      });
-    } catch (error) {
-      handleFirestoreError(error, 'rejectReport');
-      throw error;
-    }
+  // --- WORK STORAGE / CYCLES ---
+
+  subscribeToWorkStorage(parentId: string | null, callback: (items: (JobFolder | JobCycle)[]) => void): () => void {
+      const q = query(collection(db, WORK_STORAGE_COLLECTION), where("parentId", "==", parentId || 'root'));
+      return onSnapshot(q, (snapshot) => {
+          const items = snapshot.docs.map(d => ({id: d.id, ...d.data()} as (JobFolder | JobCycle)));
+          callback(items);
+      }, (e) => handleFirestoreError(e, 'subscribeToWorkStorage'));
+  },
+
+  async getWorkStorageItem(id: string): Promise<JobFolder | JobCycle | null> {
+      try {
+          const d = await getDoc(doc(db, WORK_STORAGE_COLLECTION, id));
+          return d.exists() ? ({id: d.id, ...d.data()} as JobFolder | JobCycle) : null;
+      } catch(e) { return null; }
+  },
+
+  async saveWorkStorageItem(item: JobFolder | JobCycle): Promise<void> {
+      try {
+          const data = sanitizeForFirestore(item);
+          if (item.id) {
+              await setDoc(doc(db, WORK_STORAGE_COLLECTION, item.id), data, { merge: true });
+          } else {
+              await addDoc(collection(db, WORK_STORAGE_COLLECTION), data);
+          }
+      } catch(e) { throw e; }
+  },
+
+  async updateWorkStorageItem(id: string, item: Partial<JobFolder | JobCycle>): Promise<void> {
+      try {
+          await updateDoc(doc(db, WORK_STORAGE_COLLECTION, id), item);
+      } catch(e) { throw e; }
+  },
+
+  async deleteWorkStorageItem(id: string): Promise<void> {
+      try {
+          await updateDoc(doc(db, WORK_STORAGE_COLLECTION, id), { deletedAt: new Date().toISOString() });
+      } catch(e) { throw e; }
+  },
+
+  async getJobCyclesByProduct(productId: string): Promise<JobCycle[]> {
+      try {
+          const q = query(collection(db, WORK_STORAGE_COLLECTION), where("productId", "==", productId));
+          const snap = await getDocs(q);
+          return snap.docs.map(d => ({id: d.id, ...d.data()} as JobCycle));
+      } catch(e) { return []; }
   },
 
   // --- SETUP MAPS ---
 
   async getSetupMaps(): Promise<SetupMap[]> {
-    try {
-      const q = query(collection(db, SETUP_MAPS_COLLECTION));
-      const querySnapshot = await getDocs(q);
-      return querySnapshot.docs
-        .map(doc => {
-            const data = doc.data();
-            return {
-            id: doc.id,
-            name: data.name,
-            productCatalogId: data.productCatalogId,
-            machine: data.machineNumber, 
-            blocks: data.blocks || [],
-            photoUrl: data.photoUrl,
-            drawingId: data.drawingId,
-            drawingUrl: data.drawingUrl,
-            drawingName: data.drawingName,
-            programNumber: data.programNumber,
-            deleted: data.deleted
-            } as SetupMap & { deleted?: boolean };
-        })
-        .filter(m => !m.deleted);
-    } catch (error) {
-      handleFirestoreError(error, 'getSetupMaps');
-      return [];
-    }
+      try {
+          const snap = await getDocs(collection(db, SETUP_MAPS_COLLECTION));
+          return snap.docs.map(d => ({id: d.id, ...d.data()} as SetupMap));
+      } catch(e) { return []; }
+  },
+
+  subscribeToSetupMaps(callback: (maps: SetupMap[]) => void): () => void {
+      return onSnapshot(collection(db, SETUP_MAPS_COLLECTION), (snap) => {
+          callback(snap.docs.map(d => ({id: d.id, ...d.data()} as SetupMap)));
+      });
   },
 
   async getSetupMap(id: string): Promise<SetupMap | null> {
       try {
-          const docRef = doc(db, SETUP_MAPS_COLLECTION, id);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-              const data = docSnap.data();
-              if (data.deleted) return null;
-              return {
-                  id: docSnap.id,
-                  name: data.name,
-                  productCatalogId: data.productCatalogId,
-                  machine: data.machineNumber,
-                  blocks: data.blocks || [],
-                  photoUrl: data.photoUrl,
-                  drawingId: data.drawingId,
-                  drawingUrl: data.drawingUrl,
-                  drawingName: data.drawingName,
-                  programNumber: data.programNumber,
-                  inputComponents: data.inputComponents || []
-              } as SetupMap;
-          }
-          return null;
-      } catch (error) {
-          handleFirestoreError(error, 'getSetupMap');
-          return null;
-      }
-  },
-
-  subscribeToSetupMaps(callback: (maps: SetupMap[]) => void): () => void {
-    const q = query(collection(db, SETUP_MAPS_COLLECTION));
-    return onSnapshot(q, (snapshot) => {
-      const maps = snapshot.docs
-        .map(doc => {
-            const data = doc.data();
-            return {
-            id: doc.id,
-            name: data.name,
-            productCatalogId: data.productCatalogId,
-            machine: data.machineNumber, 
-            blocks: data.blocks || [],
-            photoUrl: data.photoUrl,
-            drawingId: data.drawingId,
-            drawingUrl: data.drawingUrl,
-            drawingName: data.drawingName,
-            programNumber: data.programNumber,
-            inputComponents: data.inputComponents || [],
-            deleted: data.deleted
-            } as SetupMap & { deleted?: boolean };
-        })
-        .filter(m => !m.deleted);
-      callback(maps);
-    }, (error) => handleFirestoreError(error, 'subscribeToSetupMaps'));
+          const d = await getDoc(doc(db, SETUP_MAPS_COLLECTION, id));
+          return d.exists() ? ({id: d.id, ...d.data()} as SetupMap) : null;
+      } catch(e) { return null; }
   },
 
   async saveSetupMap(map: SetupMap): Promise<void> {
-    try {
-      const dbMap = {
-        name: map.name,
-        productCatalogId: map.productCatalogId || null,
-        machineNumber: map.machine,
-        blocks: map.blocks.map(b => ({
-            toolNumber: b.toolNumber, // Save manual tool number
-            toolName: b.toolName,
-            toolId: b.toolId || null, // Link to tool
-            settings: b.settings
-        })),
-        photoUrl: map.photoUrl || null,
-        drawingId: map.drawingId || null,
-        drawingUrl: map.drawingUrl || null,
-        drawingName: map.drawingName || null,
-        programNumber: map.programNumber || null,
-        inputComponents: map.inputComponents || [],
-        deleted: false
-      };
-
-      const cleanData = sanitizeForFirestore(dbMap);
-
-      if (map.id && !map.id.startsWith('sm_temp') && !map.id.includes('now')) {
-         await setDoc(doc(db, SETUP_MAPS_COLLECTION, map.id), cleanData, { merge: true });
-      } else {
-         await addDoc(collection(db, SETUP_MAPS_COLLECTION), cleanData);
-      }
-    } catch (error) {
-      handleFirestoreError(error, 'saveSetupMap');
-      throw error;
-    }
+      try {
+          const data = sanitizeForFirestore(map);
+          if (map.id && !map.id.startsWith('sm_')) {
+              await setDoc(doc(db, SETUP_MAPS_COLLECTION, map.id), data, { merge: true });
+          } else {
+              await addDoc(collection(db, SETUP_MAPS_COLLECTION), data);
+          }
+      } catch(e) { throw e; }
   },
 
   async deleteSetupMap(id: string): Promise<void> {
       try {
-          // SOFT DELETE
-          await updateDoc(doc(db, SETUP_MAPS_COLLECTION, id), {
-              deleted: true,
-              deletedAt: new Date().toISOString()
-          });
-      } catch (error) {
-          handleFirestoreError(error, 'deleteSetupMap');
-          throw error;
+          await deleteDoc(doc(db, SETUP_MAPS_COLLECTION, id));
+      } catch(e) { throw e; }
+  },
+
+  // --- TRASH & RESTORE ---
+
+  async getTrashItems(type: string): Promise<any[]> {
+      let colName = '';
+      switch(type) {
+          case 'task': colName = TASKS_COLLECTION; break;
+          case 'order': colName = ORDERS_COLLECTION; break;
+          case 'product': colName = CATALOGS_COLLECTION; break;
+          case 'cycle': colName = WORK_STORAGE_COLLECTION; break;
+          case 'setupMap': colName = SETUP_MAPS_COLLECTION; break;
+          default: return [];
       }
-  },
-
-  // --- SCHEDULES ---
-  async getSchedules(): Promise<WorkSchedule[]> {
-    try {
-      const querySnapshot = await getDocs(collection(db, SCHEDULES_COLLECTION));
-      return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WorkSchedule));
-    } catch (error) {
-      handleFirestoreError(error, 'getSchedules');
-      return []; 
-    }
-  },
-
-  async saveSchedule(schedule: WorkSchedule): Promise<void> {
-    try {
-      const ref = doc(db, SCHEDULES_COLLECTION, schedule.id);
       
-      const safeData = {
-          ...schedule,
-          type: schedule.type || null, 
-      };
-      
-      const cleanData = sanitizeForFirestore(safeData);
-      await setDoc(ref, cleanData, { merge: true });
-    } catch (error) {
-      handleFirestoreError(error, 'saveSchedule');
-      throw error;
-    }
-  },
-
-  async deleteSchedule(scheduleId: string): Promise<void> {
-    try {
-      await deleteDoc(doc(db, SCHEDULES_COLLECTION, scheduleId));
-    } catch (error) {
-      handleFirestoreError(error, 'deleteSchedule');
-      throw error;
-    }
-  },
-
-  // --- ATTENDANCE ---
-  async getAttendanceRecords(userId?: string, monthDate?: Date): Promise<AttendanceRecord[]> {
-    try {
-      const collectionRef = collection(db, ATTENDANCE_COLLECTION);
-      let q = query(collectionRef);
-
-      if (userId) {
-        q = query(collectionRef, where("userId", "==", userId));
-      } 
-      
-      const querySnapshot = await getDocs(q);
-      let results = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecord));
-
-      if (monthDate) {
-        const year = monthDate.getFullYear();
-        const month = String(monthDate.getMonth() + 1).padStart(2, '0');
-        const start = `${year}-${month}-01`;
-        const end = `${year}-${month}-31`;
-        results = results.filter(r => r.date >= start && r.date <= end);
+      let q;
+      if (type === 'cycle') {
+          // WorkStorage uses deletedAt
+          q = query(collection(db, colName), where("deletedAt", "!=", null));
+      } else {
+          // Others use deleted bool
+          q = query(collection(db, colName), where("deleted", "==", true));
       }
 
-      return results;
-    } catch (error) {
-      handleFirestoreError(error, 'getAttendanceRecords');
-      return [];
-    }
-  },
-
-  async saveAttendanceRecord(record: AttendanceRecord, user: User, schedules: WorkSchedule[]): Promise<void> {
-    try {
-      const docId = `${record.userId}_${record.date}`;
-      const ref = doc(db, ATTENDANCE_COLLECTION, docId);
-      const workDuration = PayrollService.calculateWorkDuration(record);
-      const { overtimeHours } = PayrollService.calculateOvertime(record, user, schedules);
-      const transportCost = PayrollService.calculateTransportCost(record);
-      const additionalCost = PayrollService.calculateAdditionalExpensesCost(record);
-      
-      const data = {
-        ...record,
-        id: docId,
-        workedMinutes: workDuration * 60,
-        overtimeMinutes: overtimeHours * 60,
-        transportCost: transportCost,
-        totalExpenses: additionalCost,
-        updatedAt: new Date().toISOString()
-      };
-
-      // Sanitize
-      const cleanData = sanitizeForFirestore(data);
-      await setDoc(ref, cleanData, { merge: true });
-    } catch (error) {
-      handleFirestoreError(error, 'saveAttendanceRecord');
-      throw error;
-    }
-  },
-
-  async deleteAttendanceRecord(id: string): Promise<void> {
-    try {
-        await deleteDoc(doc(db, ATTENDANCE_COLLECTION, id));
-    } catch (error) {
-        handleFirestoreError(error, 'deleteAttendanceRecord');
-        throw error;
-    }
-  },
-
-  // --- WORK STORAGE (Folders & Cycles) ---
-
-  subscribeToWorkStorage(parentId: string, callback: (items: (JobFolder | JobCycle)[]) => void): () => void {
-    // parentId can be 'root'
-    const q = query(collection(db, WORK_STORAGE_COLLECTION), where("parentId", "==", parentId));
-    return onSnapshot(q, (snapshot) => {
-      const items = snapshot.docs
-        .map(doc => {
-            const data = doc.data();
-            if (data.type === 'folder') {
-                return {
-                    id: doc.id,
-                    name: data.name,
-                    parentId: data.parentId,
-                    colorTag: data.color,
-                    type: 'folder',
-                    deleted: data.deleted
-                } as JobFolder & { deleted?: boolean };
-            } else {
-                return {
-                    id: doc.id,
-                    name: data.name,
-                    folderId: data.parentId, // Map parentId to folderId for compatibility with existing type
-                    colorTag: data.color,
-                    productId: data.productCatalogId,
-                    productPhoto: data.productPhoto,
-                    stages: data.stages || [],
-                    type: 'cycle', // Helper property for UI discrimination
-                    deleted: data.deleted
-                } as JobCycle & { deleted?: boolean };
-            }
-        })
-        .filter(i => !i.deleted);
-      callback(items);
-    }, (error) => handleFirestoreError(error, 'subscribeToWorkStorage'));
-  },
-
-  async getWorkStorageItem(id: string): Promise<JobFolder | JobCycle | null> {
       try {
-          const docRef = doc(db, WORK_STORAGE_COLLECTION, id);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-              const data = docSnap.data();
-              if (data.deleted) return null;
-              if (data.type === 'folder') {
-                  return { id: docSnap.id, name: data.name, parentId: data.parentId, colorTag: data.color, type: 'folder' } as unknown as JobFolder;
-              } else {
-                  return {
-                      id: docSnap.id,
-                      name: data.name,
-                      folderId: data.parentId,
-                      colorTag: data.color,
-                      productId: data.productCatalogId,
-                      productPhoto: data.productPhoto,
-                      stages: data.stages || [],
-                      type: 'cycle'
-                  } as JobCycle;
-              }
-          }
-          return null;
-      } catch (error) {
-          handleFirestoreError(error, 'getWorkStorageItem');
-          return null;
-      }
-  },
-
-  async getJobCyclesByProduct(productId: string): Promise<JobCycle[]> {
-    try {
-        const q = query(collection(db, WORK_STORAGE_COLLECTION), where("type", "==", "cycle"), where("productCatalogId", "==", productId));
-        const querySnapshot = await getDocs(q);
-        return querySnapshot.docs
-            .map(doc => {
-                const data = doc.data();
-                return {
-                    id: doc.id,
-                    name: data.name,
-                    folderId: data.parentId,
-                    colorTag: data.color,
-                    productId: data.productCatalogId,
-                    productPhoto: data.productPhoto,
-                    stages: data.stages || [],
-                    type: 'cycle',
-                    deleted: data.deleted
-                } as JobCycle & { deleted?: boolean };
-            })
-            .filter(c => !c.deleted);
-    } catch (error) {
-        handleFirestoreError(error, 'getJobCyclesByProduct');
-        return [];
-    }
-  },
-
-  async saveWorkStorageItem(item: JobFolder | JobCycle): Promise<void> {
-      try {
-          // Check if it has stages property to discriminate type
-          const isCycle = 'stages' in item;
-          
-          let data: any = {
-              name: item.name,
-              color: item.colorTag || '#3b82f6',
-              createdAt: new Date().toISOString(),
-              deleted: false
-          };
-
-          if (isCycle) {
-              const cycle = item as JobCycle;
-              data.type = 'cycle';
-              data.parentId = cycle.folderId || 'root';
-              data.productCatalogId = cycle.productId || null;
-              data.productPhoto = cycle.productPhoto || null;
-              data.stages = cycle.stages || [];
-          } else {
-              const folder = item as JobFolder;
-              data.type = 'folder';
-              data.parentId = folder.parentId || 'root';
-          }
-
-          const cleanData = sanitizeForFirestore(data);
-
-          if (item.id && !item.id.startsWith('c_') && !item.id.startsWith('f_')) {
-              await setDoc(doc(db, WORK_STORAGE_COLLECTION, item.id), cleanData, { merge: true });
-          } else {
-              await addDoc(collection(db, WORK_STORAGE_COLLECTION), cleanData);
-          }
-      } catch (error) {
-          handleFirestoreError(error, 'saveWorkStorageItem');
-          throw error;
-      }
-  },
-
-  async updateWorkStorageItem(id: string, item: JobFolder | JobCycle): Promise<void> {
-      try {
-          const docRef = doc(db, WORK_STORAGE_COLLECTION, id);
-          const isCycle = 'stages' in item;
-          
-          let data: any = {
-              name: item.name,
-              color: item.colorTag,
-          };
-          
-          if (isCycle) {
-              const cycle = item as JobCycle;
-              data.productCatalogId = cycle.productId || null;
-              data.productPhoto = cycle.productPhoto || null;
-              data.stages = cycle.stages || [];
-          }
-          
-          await updateDoc(docRef, sanitizeForFirestore(data));
-      } catch (error) {
-          handleFirestoreError(error, 'updateWorkStorageItem');
-          throw error;
-      }
-  },
-
-  async deleteWorkStorageItem(id: string): Promise<void> {
-      try {
-          // SOFT DELETE
-          await updateDoc(doc(db, WORK_STORAGE_COLLECTION, id), {
-              deleted: true,
-              deletedAt: new Date().toISOString()
-          });
-      } catch (error) {
-          handleFirestoreError(error, 'deleteWorkStorageItem');
-          throw error;
-      }
-  },
-
-  // --- TRASH MANAGEMENT (New Methods) ---
-
-  async getTrashItems(type: 'task' | 'product' | 'order' | 'cycle' | 'setupMap'): Promise<any[]> {
-      try {
-          let collectionName = '';
-          if (type === 'task') collectionName = TASKS_COLLECTION;
-          if (type === 'product') collectionName = CATALOGS_COLLECTION;
-          if (type === 'order') collectionName = ORDERS_COLLECTION;
-          if (type === 'cycle') collectionName = WORK_STORAGE_COLLECTION;
-          if (type === 'setupMap') collectionName = SETUP_MAPS_COLLECTION;
-
-          if (!collectionName) return [];
-
-          // Use client-side filtering for 'deleted == true' to avoid requiring 5+ composite indexes immediately
-          const q = query(collection(db, collectionName));
-          const querySnapshot = await getDocs(q);
-          
-          return querySnapshot.docs
-              .map(doc => ({ id: doc.id, ...doc.data() }))
-              .filter((item: any) => item.deleted === true);
-
-      } catch (error) {
-          handleFirestoreError(error, 'getTrashItems');
+          const snap = await getDocs(q);
+          return snap.docs.map(d => ({id: d.id, ...d.data(), type}));
+      } catch (e) {
+          // Fallback if index missing or field undefined
           return [];
       }
   },
 
-  async restoreItem(type: 'task' | 'product' | 'order' | 'cycle' | 'setupMap', id: string): Promise<void> {
-      try {
-          let collectionName = '';
-          if (type === 'task') collectionName = TASKS_COLLECTION;
-          if (type === 'product') collectionName = CATALOGS_COLLECTION;
-          if (type === 'order') collectionName = ORDERS_COLLECTION;
-          if (type === 'cycle') collectionName = WORK_STORAGE_COLLECTION;
-          if (type === 'setupMap') collectionName = SETUP_MAPS_COLLECTION;
-
-          if (!collectionName) return;
-
-          await updateDoc(doc(db, collectionName, id), {
-              deleted: false,
-              deletedAt: null
-          });
-      } catch (error) {
-          handleFirestoreError(error, 'restoreItem');
-          throw error;
+  async restoreItem(type: string, id: string): Promise<void> {
+      let colName = '';
+      switch(type) {
+          case 'task': colName = TASKS_COLLECTION; break;
+          case 'order': colName = ORDERS_COLLECTION; break;
+          case 'product': colName = CATALOGS_COLLECTION; break;
+          case 'cycle': colName = WORK_STORAGE_COLLECTION; break;
+          case 'setupMap': colName = SETUP_MAPS_COLLECTION; break;
+      }
+      if(colName) {
+          const updates: any = { deleted: false };
+          if (type === 'cycle') updates.deletedAt = null;
+          else updates.deletedAt = null; // Clean up just in case
+          await updateDoc(doc(db, colName, id), updates);
       }
   },
 
-  async permanentlyDeleteItem(type: 'task' | 'product' | 'order' | 'cycle' | 'setupMap', id: string): Promise<void> {
-      try {
-          let collectionName = '';
-          if (type === 'task') collectionName = TASKS_COLLECTION;
-          if (type === 'product') collectionName = CATALOGS_COLLECTION;
-          if (type === 'order') collectionName = ORDERS_COLLECTION;
-          if (type === 'cycle') collectionName = WORK_STORAGE_COLLECTION;
-          if (type === 'setupMap') collectionName = SETUP_MAPS_COLLECTION;
-
-          if (!collectionName) return;
-
-          await deleteDoc(doc(db, collectionName, id));
-      } catch (error) {
-          handleFirestoreError(error, 'permanentlyDeleteItem');
-          throw error;
+  async permanentlyDeleteItem(type: string, id: string): Promise<void> {
+      let colName = '';
+      switch(type) {
+          case 'task': colName = TASKS_COLLECTION; break;
+          case 'order': colName = ORDERS_COLLECTION; break;
+          case 'product': colName = CATALOGS_COLLECTION; break;
+          case 'cycle': colName = WORK_STORAGE_COLLECTION; break;
+          case 'setupMap': colName = SETUP_MAPS_COLLECTION; break;
       }
+      if(colName) await deleteDoc(doc(db, colName, id));
   }
+
 };
 
 export const API = ApiService;

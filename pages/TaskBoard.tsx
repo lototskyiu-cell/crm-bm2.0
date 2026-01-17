@@ -1,4 +1,5 @@
 
+// ... existing imports ...
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Task, TaskType, Order, User, JobCycle, SetupMap, TaskStatus, Tool } from '../types';
 import { API } from '../services/api';
@@ -314,6 +315,17 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                     );
                 }
             }
+            
+            // --- TRIGGER ADMIN NOTIFICATION (Batch Creation) ---
+            await API.sendNotification(
+                'admin',
+                `Створено виробничу партію: ${selectedOrder?.orderNumber}`,
+                'info',
+                undefined,
+                'admin',
+                'Нова партія'
+            );
+
         } 
         else {
             let finalTitle = title;
@@ -340,6 +352,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
             await API.saveTask(newTask);
 
             if (!editingTaskId) {
+                // Notify Assignees
                 for (const uid of assigneeIds) {
                     await API.sendNotification(
                         uid, 
@@ -347,6 +360,15 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                         'task_assigned'
                     );
                 }
+                // --- TRIGGER ADMIN NOTIFICATION (Single Task) ---
+                await API.sendNotification(
+                    'admin',
+                    `Нове завдання: ${finalTitle}`,
+                    'info',
+                    undefined,
+                    'admin',
+                    'Нове завдання'
+                );
             }
         }
 
@@ -522,6 +544,17 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
       setTasks(prevTasks => prevTasks.map(t => t.id === draggedTaskId ? { ...t, status: newStatus } : t));
       try {
         await API.updateTaskStatus(draggedTaskId, newStatus);
+        
+        // --- TRIGGER ADMIN NOTIFICATION (Status Change) ---
+        await API.sendNotification(
+            'admin',
+            `Статус змінено: ${task.title} -> ${newStatus.toUpperCase()}`,
+            'warning',
+            undefined,
+            'admin',
+            'Оновлення статусу'
+        );
+
       } catch (err) {
         console.error("Failed to update status", err);
       }
@@ -529,6 +562,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
     setDraggedTaskId(null);
   };
 
+  // ... (Rest of UI rendering remains unchanged) ...
   if (isLoading) return <div className="p-8 flex justify-center"><Loader className="animate-spin text-blue-600"/></div>;
 
   const renderCard = (task: Task, isArchiveView: boolean = false, onArchive?: (id: string) => void) => {
@@ -855,24 +889,24 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
 
   return (
     <div className="p-8 h-full flex flex-col">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Дошка завдань</h1>
           <p className="text-gray-500">Моніторинг виробничого процесу (Firestore Sync)</p>
         </div>
         
-        <div className="flex gap-4">
+        <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
             {/* Tabs */}
-            <div className="flex bg-gray-100 p-1 rounded-lg">
+            <div className="flex bg-gray-100 p-1 rounded-lg w-full sm:w-auto">
                 <button 
                     onClick={() => setCurrentTab('active')}
-                    className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${currentTab === 'active' ? 'bg-white shadow text-slate-900' : 'text-gray-500'}`}
+                    className={`flex-1 sm:flex-none px-4 py-2 text-sm font-bold rounded-md transition-all ${currentTab === 'active' ? 'bg-white shadow text-slate-900' : 'text-gray-500'}`}
                 >
                     Активні
                 </button>
                 <button 
                     onClick={() => setCurrentTab('archive')}
-                    className={`px-4 py-2 text-sm font-bold rounded-md transition-all ${currentTab === 'archive' ? 'bg-white shadow text-slate-900' : 'text-gray-500'}`}
+                    className={`flex-1 sm:flex-none px-4 py-2 text-sm font-bold rounded-md transition-all ${currentTab === 'archive' ? 'bg-white shadow text-slate-900' : 'text-gray-500'}`}
                 >
                     Архів
                 </button>
@@ -881,7 +915,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
             {isEditor && (
                 <button 
                 onClick={() => { resetForm(); setIsModalOpen(true); }}
-                className="bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center hover:bg-slate-800 transition-colors shadow-lg"
+                className="bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center justify-center hover:bg-slate-800 transition-colors shadow-lg w-full sm:w-auto"
                 >
                 <Plus size={20} className="mr-2" />
                 Нове завдання

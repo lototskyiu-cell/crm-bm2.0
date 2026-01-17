@@ -385,4 +385,8 @@ export interface Notification {
   read: boolean;
   createdAt: any; // Firestore Timestamp
   type: string;
+  // Enhanced Fields
+  title?: string;
+  target?: 'admin' | 'user' | 'global';
+  linkId?: string;
 }

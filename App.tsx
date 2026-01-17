@@ -19,13 +19,13 @@ import { Tools } from './pages/Tools';
 import { User } from './types';
 import { NotificationBell } from './components/NotificationBell';
 import { API } from './services/api';
+import { ThemeProvider } from './context/ThemeContext';
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentPath, setCurrentPath] = useState<string>('/analytics'); 
   const [selectedCycleId, setSelectedCycleId] = useState<string | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [globalBackground, setGlobalBackground] = useState<string | null>(null);
   
   // Mobile Layout State
   const [isMobile, setIsMobile] = useState(false);
@@ -67,15 +67,6 @@ const App: React.FC = () => {
     // Listen for storage events (triggered by Settings page)
     window.addEventListener('storage', checkLayout);
     
-    // Fetch global background
-    const fetchGlobalSettings = async () => {
-        const settings = await API.getAdminSettings();
-        if (settings?.backgroundImageUrl) {
-            setGlobalBackground(settings.backgroundImageUrl);
-        }
-    };
-    fetchGlobalSettings();
-
     return () => {
         window.removeEventListener('resize', checkLayout);
         window.removeEventListener('storage', checkLayout);
@@ -165,20 +156,9 @@ const App: React.FC = () => {
   };
   
   const Placeholder = ({path}: {path: string}) => (
-    <div className="p-10 text-center text-gray-500">
+    <div className="p-10 text-center text-gray-500 dark:text-gray-400">
        <h2 className="text-xl font-bold">Розділ в розробці ({path})</h2>
     </div>
-  );
-
-  const BackgroundLayer = () => (
-      globalBackground ? (
-          <div 
-              className="fixed inset-0 z-[-1] bg-cover bg-center transition-all duration-500"
-              style={{ 
-                  backgroundImage: `url(${globalBackground})`
-              }}
-          />
-      ) : null
   );
 
   if (!currentUser) {
@@ -188,8 +168,7 @@ const App: React.FC = () => {
   // --- MOBILE LAYOUT ---
   if (isMobile) {
       return (
-        <div className={`min-h-screen flex flex-col ${globalBackground ? 'bg-transparent' : 'bg-gray-50'}`}>
-            <BackgroundLayer />
+        <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-slate-900 transition-colors duration-300">
             <MobileHeader 
                 currentUser={currentUser} 
                 onNavigate={handleNavigate}
@@ -213,8 +192,7 @@ const App: React.FC = () => {
 
   // --- DESKTOP LAYOUT ---
   return (
-    <div className={`flex min-h-screen relative ${globalBackground ? 'bg-transparent' : 'bg-slate-50'}`}>
-      <BackgroundLayer />
+    <div className="flex min-h-screen relative bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
       <Sidebar 
         currentUser={currentUser} 
         currentPath={currentPath}
@@ -224,7 +202,7 @@ const App: React.FC = () => {
         onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
       />
       
-      <main className={`flex-1 transition-all duration-300 ease-in-out ${isSidebarCollapsed ? 'ml-20' : 'ml-64'} relative`}>
+      <main className={`flex-1 transition-all duration-300 ease-in-out ${isSidebarCollapsed ? 'ml-20' : 'ml-64'} relative dark:text-gray-100`}>
         {/* Top Right Actions Layer */}
         <div className="absolute top-6 right-8 z-[90] flex items-center gap-4">
            <NotificationBell currentUser={currentUser} />
@@ -236,5 +214,12 @@ const App: React.FC = () => {
   );
 };
 
+const App: React.FC = () => {
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
+  );
+};
+
 export default App;
-    

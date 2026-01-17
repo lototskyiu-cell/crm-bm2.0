@@ -61,7 +61,8 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
 
   const [draggedItem, setDraggedItem] = useState<{ type: 'tool' | 'folder' | 'warehouseItem' | 'productionItem', id: string } | null>(null);
   
-  const [deleteConfirm, setDeleteConfirm] = useState<{isOpen: boolean, id: string} | null>(null);
+  // Updated state to include type
+  const [deleteConfirm, setDeleteConfirm] = useState<{isOpen: boolean, type: 'tool' | 'folder', id: string} | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
@@ -201,17 +202,31 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
 
   const handleDeleteTool = (e: React.MouseEvent, id: string) => {
       e.stopPropagation();
-      setDeleteConfirm({ isOpen: true, id });
+      setDeleteConfirm({ isOpen: true, type: 'tool', id });
+  }
+
+  // NEW: Delete Folder Handler
+  const handleDeleteFolder = (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      setDeleteConfirm({ isOpen: true, type: 'folder', id });
   }
 
   const confirmDelete = async () => {
       if (!deleteConfirm) return;
       setIsDeleting(true);
       try {
-          await API.deleteTool(deleteConfirm.id);
+          if (deleteConfirm.type === 'tool') {
+              await API.deleteTool(deleteConfirm.id);
+          } else {
+              // Delete Folder
+              await API.deleteToolFolder(deleteConfirm.id);
+              store.deleteToolFolder(deleteConfirm.id);
+              refreshData();
+          }
           setDeleteConfirm(null);
       } catch(e) {
-          alert('Error deleting tool');
+          console.error(e);
+          alert('Error deleting item');
       } finally {
           setIsDeleting(false);
       }
@@ -562,6 +577,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
                                 <button onClick={(e) => handleEditFolder(e, f)} className="p-1 bg-white shadow rounded hover:text-blue-600 border border-gray-100"><Pencil size={12}/></button>
                                 <button onClick={(e) => handleClipboard('folder', f.id, 'copy', e)} className="p-1 bg-white shadow rounded hover:text-blue-600 border border-gray-100"><ClipboardCopy size={12}/></button>
                                 <button onClick={(e) => handleClipboard('folder', f.id, 'cut', e)} className="p-1 bg-white shadow rounded hover:text-orange-600 border border-gray-100"><Scissors size={12}/></button>
+                                <button onClick={(e) => handleDeleteFolder(e, f.id)} className="p-1 bg-white shadow rounded hover:text-red-600 border border-gray-100"><Trash2 size={12}/></button>
                              </div>
                          </div>
                      ))}
@@ -646,6 +662,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
                                         <button onClick={(e) => handleEditFolder(e, f)} className="p-1 bg-white rounded shadow hover:text-blue-600 border border-gray-100"><Pencil size={12}/></button>
                                         <button onClick={(e) => handleClipboard('folder', f.id, 'copy', e)} className="p-1 bg-white rounded shadow hover:text-blue-600 border border-gray-100"><ClipboardCopy size={12}/></button>
                                         <button onClick={(e) => handleClipboard('folder', f.id, 'cut', e)} className="p-1 bg-white rounded shadow hover:text-orange-600 border border-gray-100"><Scissors size={12}/></button>
+                                        <button onClick={(e) => handleDeleteFolder(e, f.id)} className="p-1 bg-white rounded shadow hover:text-red-600 border border-gray-100"><Trash2 size={12}/></button>
                                      </div>
                                  </div>
                              ))}
@@ -764,6 +781,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
                                         <button onClick={(e) => handleEditFolder(e, f)} className="p-1 bg-white rounded shadow hover:text-blue-600 border border-gray-100"><Pencil size={12}/></button>
                                         <button onClick={(e) => handleClipboard('folder', f.id, 'copy', e)} className="p-1 bg-white rounded shadow hover:text-blue-600 border border-gray-100"><ClipboardCopy size={12}/></button>
                                         <button onClick={(e) => handleClipboard('folder', f.id, 'cut', e)} className="p-1 bg-white rounded shadow hover:text-orange-600 border border-gray-100"><Scissors size={12}/></button>
+                                        <button onClick={(e) => handleDeleteFolder(e, f.id)} className="p-1 bg-white rounded shadow hover:text-red-600 border border-gray-100"><Trash2 size={12}/></button>
                                      </div>
                                  </div>
                              ))}
@@ -1159,7 +1177,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
       {deleteConfirm && (
         <DeleteConfirmModal 
             isOpen={!!deleteConfirm}
-            title="Видалити інструмент?"
+            title={deleteConfirm.type === 'tool' ? 'Видалити інструмент?' : 'Видалити папку?'}
             message="Ви впевнені? Це незворотня дія."
             onClose={() => setDeleteConfirm(null)}
             onConfirm={confirmDelete}

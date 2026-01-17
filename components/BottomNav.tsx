@@ -82,20 +82,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentUser, currentPath, 
             <div className="pt-20 pb-24 px-4 min-h-full flex flex-col">
                 <div className="flex justify-between items-center mb-2 px-2">
                     <h2 className="text-2xl font-bold text-white">Меню</h2>
-                    {/* User Info Badge */}
-                    <div className="flex items-center gap-3">
-                        <div className="text-right hidden sm:block">
-                            <div className="text-sm font-bold text-white">{currentUser.firstName} {currentUser.lastName}</div>
-                            <div className="text-xs text-gray-500 uppercase">{currentUser.role}</div>
-                        </div>
-                        <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300">
-                            {currentUser.avatar ? (
-                                <img src={currentUser.avatar} className="w-full h-full rounded-full object-cover"/>
-                            ) : (
-                                <UserIcon size={20}/>
-                            )}
-                        </div>
-                    </div>
+                    {/* User Icon removed as per request */}
                 </div>
 
                 {/* --- SECTION: MODULES (Navigation) --- */}

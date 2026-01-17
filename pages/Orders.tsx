@@ -130,6 +130,20 @@ export const Orders: React.FC = () => {
 
     try {
         await API.saveOrder(order);
+        
+        // --- TRIGGER NOTIFICATION FOR ADMIN ---
+        if (!editingId) {
+            const product = getProduct(order.productId);
+            await API.sendNotification(
+                'admin', 
+                `Нове замовлення: ${order.orderNumber} (${product?.name || 'Виріб'}) - ${order.quantity} шт.`,
+                'info',
+                undefined,
+                'admin', // Target
+                'Нове замовлення' // Title
+            );
+        }
+
         setIsModalOpen(false);
     } catch (e) {
         alert("Error saving order");

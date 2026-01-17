@@ -3,7 +3,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, TransportMode, RoleConfig, ModulePermission } from '../types';
 import { API } from '../services/api';
 import { uploadFileToCloudinary } from '../services/cloudinary';
-import { Save, Car, Bus, User as UserIcon, Lock, Loader, AlertTriangle, Trash2, RefreshCw, X, Box, ClipboardList, ShoppingCart, Folder, Wrench, Shield, Check, Plus, CornerDownRight, Smartphone, Monitor, LayoutTemplate, Camera, Image as ImageIcon } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
+import { Save, Car, Bus, User as UserIcon, Lock, Loader, AlertTriangle, Trash2, RefreshCw, X, Box, ClipboardList, ShoppingCart, Folder, Wrench, Shield, Check, Plus, CornerDownRight, Smartphone, Monitor, LayoutTemplate, Camera, Image as ImageIcon, Sun, Moon } from 'lucide-react';
 
 interface SettingsProps {
   currentUser: User;
@@ -54,6 +55,9 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'profile' | 'access' | 'trash'>('profile');
   
+  // Theme Hook
+  const { theme, setTheme } = useTheme();
+
   // View Mode
   const [viewMode, setViewMode] = useState<'desktop' | 'mobile' | 'auto'>('auto');
 
@@ -316,15 +320,15 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto pb-24">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-            <UserIcon className="mr-3 text-slate-700" /> Налаштування
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center">
+            <UserIcon className="mr-3 text-slate-700 dark:text-slate-300" /> Налаштування
           </h1>
-          <div className="bg-gray-100 p-1 rounded-lg flex overflow-x-auto max-w-full">
-             <button onClick={() => setActiveTab('profile')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'profile' ? 'bg-white shadow text-slate-900' : 'text-gray-500'}`}>Профіль</button>
+          <div className="bg-gray-100 dark:bg-slate-800 p-1 rounded-lg flex overflow-x-auto max-w-full">
+             <button onClick={() => setActiveTab('profile')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'profile' ? 'bg-white dark:bg-slate-600 shadow text-slate-900 dark:text-white' : 'text-gray-500 dark:text-slate-400'}`}>Профіль</button>
              {user.role === 'admin' && (
                  <>
-                    <button onClick={() => setActiveTab('access')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all flex items-center whitespace-nowrap ${activeTab === 'access' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}><Shield size={16} className="mr-2"/> Права</button>
-                    <button onClick={() => setActiveTab('trash')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all flex items-center whitespace-nowrap ${activeTab === 'trash' ? 'bg-white shadow text-red-600' : 'text-gray-500'}`}><Trash2 size={16} className="mr-2"/> Кошик</button>
+                    <button onClick={() => setActiveTab('access')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all flex items-center whitespace-nowrap ${activeTab === 'access' ? 'bg-white dark:bg-slate-600 shadow text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-slate-400'}`}><Shield size={16} className="mr-2"/> Права</button>
+                    <button onClick={() => setActiveTab('trash')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all flex items-center whitespace-nowrap ${activeTab === 'trash' ? 'bg-white dark:bg-slate-600 shadow text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-slate-400'}`}><Trash2 size={16} className="mr-2"/> Кошик</button>
                  </>
              )}
           </div>
@@ -335,16 +339,16 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
         <div className="grid grid-cols-1 gap-6 animate-fade-in">
             
             {/* --- PROFILE PHOTO SECTION --- */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 mb-2 flex flex-col items-center">
-                <h2 className="text-lg font-bold text-gray-800 mb-4 self-start w-full border-b border-gray-100 pb-2">Мій Профіль</h2>
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-slate-700 mb-2 flex flex-col items-center transition-colors">
+                <h2 className="text-lg font-bold text-gray-800 dark:text-white mb-4 self-start w-full border-b border-gray-100 dark:border-slate-700 pb-2">Мій Профіль</h2>
                 
                 <div className="relative group cursor-pointer" onClick={() => !isPhotoUploading && fileInputRef.current?.click()}>
                     {/* Avatar Circle */}
-                    <div className="w-28 h-28 rounded-full overflow-hidden border-4 border-gray-50 shadow-inner bg-gray-100 relative">
+                    <div className="w-28 h-28 rounded-full overflow-hidden border-4 border-gray-50 dark:border-slate-700 shadow-inner bg-gray-100 dark:bg-slate-900 relative">
                         {photoPreview ? (
                             <img src={photoPreview} alt="Avatar" className="w-full h-full object-cover" />
                         ) : (
-                            <div className="w-full h-full flex items-center justify-center text-4xl text-gray-300 font-bold">
+                            <div className="w-full h-full flex items-center justify-center text-4xl text-gray-300 dark:text-slate-600 font-bold">
                                 {user.firstName?.[0] || "U"}
                             </div>
                         )}
@@ -365,7 +369,7 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
                     )}
                 </div>
                 
-                <p className="text-xs text-gray-400 mt-3 font-medium">Натисніть на фото, щоб змінити</p>
+                <p className="text-xs text-gray-400 dark:text-slate-500 mt-3 font-medium">Натисніть на фото, щоб змінити</p>
 
                 {/* Hidden Input */}
                 <input 
@@ -377,18 +381,18 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
                 />
             </div>
 
-            {/* VIEW MODE SETTINGS */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center">
-                    <LayoutTemplate size={18} className="text-gray-500 mr-2" />
-                    <span className="font-bold text-gray-700">Інтерфейс</span>
+            {/* VIEW MODE & THEME SETTINGS */}
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden transition-colors">
+                <div className="p-4 bg-gray-50 dark:bg-slate-900/50 border-b border-gray-100 dark:border-slate-700 flex items-center">
+                    <LayoutTemplate size={18} className="text-gray-500 dark:text-slate-400 mr-2" />
+                    <span className="font-bold text-gray-700 dark:text-slate-200">Інтерфейс</span>
                 </div>
                 <div className="p-6">
-                    <label className="block text-xs font-bold text-gray-400 uppercase mb-3">Режим відображення</label>
-                    <div className="grid grid-cols-3 gap-3">
+                    <label className="block text-xs font-bold text-gray-400 dark:text-slate-500 uppercase mb-3">Режим відображення</label>
+                    <div className="grid grid-cols-3 gap-3 mb-6">
                         <button 
                             onClick={() => setViewMode('auto')}
-                            className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${viewMode === 'auto' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300'}`}
+                            className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${viewMode === 'auto' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-600 dark:text-slate-400 hover:border-blue-300'}`}
                         >
                             <div className="flex gap-1 mb-2">
                                 <Smartphone size={16}/>
@@ -398,32 +402,58 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
                         </button>
                         <button 
                             onClick={() => setViewMode('desktop')}
-                            className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${viewMode === 'desktop' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300'}`}
+                            className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${viewMode === 'desktop' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-600 dark:text-slate-400 hover:border-blue-300'}`}
                         >
                             <Monitor size={20} className="mb-2"/>
                             <span className="text-sm font-bold">ПК (Desktop)</span>
                         </button>
                         <button 
                             onClick={() => setViewMode('mobile')}
-                            className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${viewMode === 'mobile' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300'}`}
+                            className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${viewMode === 'mobile' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-600 dark:text-slate-400 hover:border-blue-300'}`}
                         >
                             <Smartphone size={20} className="mb-2"/>
                             <span className="text-sm font-bold">Мобільний</span>
                         </button>
                     </div>
-                    <p className="text-xs text-gray-400 mt-2 flex items-center">
+
+                    <label className="block text-xs font-bold text-gray-400 dark:text-slate-500 uppercase mb-3">Оформлення</label>
+                    <div className="grid grid-cols-3 gap-3">
+                        <button 
+                            onClick={() => setTheme('light')}
+                            className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${theme === 'light' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-600 dark:text-slate-400 hover:border-blue-300'}`}
+                        >
+                            <Sun size={20} className="mb-2"/>
+                            <span className="text-sm font-bold">Світла</span>
+                        </button>
+                        <button 
+                            onClick={() => setTheme('dark')}
+                            className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${theme === 'dark' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-600 dark:text-slate-400 hover:border-blue-300'}`}
+                        >
+                            <Moon size={20} className="mb-2"/>
+                            <span className="text-sm font-bold">Темна</span>
+                        </button>
+                        <button 
+                            onClick={() => setTheme('system')}
+                            className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${theme === 'system' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-600 dark:text-slate-400 hover:border-blue-300'}`}
+                        >
+                            <Monitor size={20} className="mb-2"/>
+                            <span className="text-sm font-bold">Системна</span>
+                        </button>
+                    </div>
+
+                    <p className="text-xs text-gray-400 dark:text-slate-500 mt-3 flex items-center">
                         <AlertTriangle size={12} className="mr-1"/>
-                        Зміни застосуються після збереження та перезавантаження.
+                        Зміни інтерфейсу застосуються відразу.
                     </p>
                 </div>
             </div>
 
             {/* SECURITY */}
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden transition-colors">
+                <div className="p-4 bg-gray-50 dark:bg-slate-900/50 border-b border-gray-100 dark:border-slate-700 flex items-center justify-between">
                     <div className="flex items-center">
-                    <Lock size={18} className="text-gray-500 mr-2" />
-                    <span className="font-bold text-gray-700">Безпека та Вхід</span>
+                    <Lock size={18} className="text-gray-500 dark:text-slate-400 mr-2" />
+                    <span className="font-bold text-gray-700 dark:text-slate-200">Безпека та Вхід</span>
                     </div>
                     {user.role === 'admin' && (
                     <span className="text-[10px] bg-red-100 text-red-600 px-2 py-1 rounded font-bold uppercase">Admin Access</span>
@@ -432,29 +462,29 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
                 
                 <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Логін для входу</label>
+                        <label className="block text-xs font-bold text-gray-400 dark:text-slate-500 uppercase mb-1">Логін для входу</label>
                         {user.role === 'admin' ? (
                         <input 
                             type="text" 
                             value={user.login}
                             onChange={e => setUser({...user, login: e.target.value})}
-                            className="w-full p-3 border border-blue-200 bg-blue-50 rounded-lg text-blue-900 font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                            className="w-full p-3 border border-blue-200 bg-blue-50 rounded-lg text-blue-900 font-bold focus:ring-2 focus:ring-blue-500 outline-none dark:bg-blue-900/20 dark:text-blue-200 dark:border-blue-800"
                         />
                         ) : (
-                        <div className="p-3 bg-gray-100 rounded-lg text-gray-500 font-mono border border-gray-200 flex justify-between">
+                        <div className="p-3 bg-gray-100 dark:bg-slate-700 rounded-lg text-gray-500 dark:text-slate-300 font-mono border border-gray-200 dark:border-slate-600 flex justify-between">
                             {user.login}
-                            <Lock size={14} className="text-gray-400"/>
+                            <Lock size={14} className="text-gray-400 dark:text-slate-500"/>
                         </div>
                         )}
                     </div>
 
                     <div>
-                        <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Пароль</label>
+                        <label className="block text-xs font-bold text-gray-400 dark:text-slate-500 uppercase mb-1">Пароль</label>
                         <input 
                         type="text" 
                         value={password}
                         onChange={e => setPassword(e.target.value)}
-                        className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-gray-800"
+                        className="w-full p-3 border border-gray-200 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-gray-800 dark:text-white dark:bg-slate-700"
                         placeholder="Встановіть новий пароль"
                         />
                     </div>
@@ -463,25 +493,25 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
 
             {/* DEFAULTS (WORKER ONLY) */}
             {user.role === 'worker' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="p-4 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden transition-colors">
+                <div className="p-4 bg-gray-50 dark:bg-slate-900/50 border-b border-gray-100 dark:border-slate-700 flex items-center justify-between">
                     <div className="flex items-center">
-                    <Car size={18} className="text-gray-500 mr-2" />
-                    <span className="font-bold text-gray-700">Дефолтні дані для звітів</span>
+                    <Car size={18} className="text-gray-500 dark:text-slate-400 mr-2" />
+                    <span className="font-bold text-gray-700 dark:text-slate-200">Дефолтні дані для звітів</span>
                     </div>
                 </div>
                 
                 <div className="p-6 space-y-6">
-                    <div className="flex bg-gray-100 p-1 rounded-lg w-fit">
+                    <div className="flex bg-gray-100 dark:bg-slate-700 p-1 rounded-lg w-fit">
                     <button 
                         onClick={() => setDefaults({...defaults, transportMode: 'car'})}
-                        className={`px-4 py-2 rounded-md text-sm font-bold flex items-center transition-all ${defaults.transportMode === 'car' ? 'bg-white shadow-sm text-slate-900' : 'text-gray-500 hover:text-gray-700'}`}
+                        className={`px-4 py-2 rounded-md text-sm font-bold flex items-center transition-all ${defaults.transportMode === 'car' ? 'bg-white dark:bg-slate-600 shadow-sm text-slate-900 dark:text-white' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-300'}`}
                     >
                         <Car size={16} className="mr-2"/> Власне авто
                     </button>
                     <button 
                         onClick={() => setDefaults({...defaults, transportMode: 'bus'})}
-                        className={`px-4 py-2 rounded-md text-sm font-bold flex items-center transition-all ${defaults.transportMode === 'bus' ? 'bg-white shadow-sm text-slate-900' : 'text-gray-500 hover:text-gray-700'}`}
+                        className={`px-4 py-2 rounded-md text-sm font-bold flex items-center transition-all ${defaults.transportMode === 'bus' ? 'bg-white dark:bg-slate-600 shadow-sm text-slate-900 dark:text-white' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-300'}`}
                     >
                         <Bus size={16} className="mr-2"/> Громадський транспорт
                     </button>
@@ -491,34 +521,34 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
                         <div className="space-y-4">
                         <div>
-                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Відстань до роботи (км)</label>
-                            <input type="number" value={defaults.distanceTo} onChange={e => setDefaults({...defaults, distanceTo: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-lg font-bold text-gray-700 focus:border-blue-500 outline-none" placeholder="0" />
+                            <label className="block text-xs font-bold text-gray-400 dark:text-slate-500 uppercase mb-1">Відстань до роботи (км)</label>
+                            <input type="number" value={defaults.distanceTo} onChange={e => setDefaults({...defaults, distanceTo: Number(e.target.value)})} className="w-full p-3 border border-gray-200 dark:border-slate-600 rounded-lg font-bold text-gray-700 dark:text-white dark:bg-slate-700 focus:border-blue-500 outline-none" placeholder="0" />
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Відстань з роботи (км)</label>
-                            <input type="number" value={defaults.distanceFrom} onChange={e => setDefaults({...defaults, distanceFrom: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-lg font-bold text-gray-700 focus:border-blue-500 outline-none" placeholder="0" />
+                            <label className="block text-xs font-bold text-gray-400 dark:text-slate-500 uppercase mb-1">Відстань з роботи (км)</label>
+                            <input type="number" value={defaults.distanceFrom} onChange={e => setDefaults({...defaults, distanceFrom: Number(e.target.value)})} className="w-full p-3 border border-gray-200 dark:border-slate-600 rounded-lg font-bold text-gray-700 dark:text-white dark:bg-slate-700 focus:border-blue-500 outline-none" placeholder="0" />
                         </div>
                         </div>
                         <div className="space-y-4">
                         <div>
-                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Витрата пального (л/100км)</label>
-                            <input type="number" value={defaults.fuelConsumption} onChange={e => setDefaults({...defaults, fuelConsumption: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-lg font-bold text-gray-700 focus:border-blue-500 outline-none" placeholder="0" />
+                            <label className="block text-xs font-bold text-gray-400 dark:text-slate-500 uppercase mb-1">Витрата пального (л/100км)</label>
+                            <input type="number" value={defaults.fuelConsumption} onChange={e => setDefaults({...defaults, fuelConsumption: Number(e.target.value)})} className="w-full p-3 border border-gray-200 dark:border-slate-600 rounded-lg font-bold text-gray-700 dark:text-white dark:bg-slate-700 focus:border-blue-500 outline-none" placeholder="0" />
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Ціна пального (грн/л)</label>
-                            <input type="number" value={defaults.fuelPrice} onChange={e => setDefaults({...defaults, fuelPrice: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-lg font-bold text-gray-700 focus:border-blue-500 outline-none" placeholder="0" />
+                            <label className="block text-xs font-bold text-gray-400 dark:text-slate-500 uppercase mb-1">Ціна пального (грн/л)</label>
+                            <input type="number" value={defaults.fuelPrice} onChange={e => setDefaults({...defaults, fuelPrice: Number(e.target.value)})} className="w-full p-3 border border-gray-200 dark:border-slate-600 rounded-lg font-bold text-gray-700 dark:text-white dark:bg-slate-700 focus:border-blue-500 outline-none" placeholder="0" />
                         </div>
                         </div>
                     </div>
                     ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
                         <div>
-                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Ціна квитка ТУДИ (грн)</label>
-                            <input type="number" value={defaults.busPriceTo} onChange={e => setDefaults({...defaults, busPriceTo: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-lg font-bold text-gray-700 focus:border-blue-500 outline-none" placeholder="0" />
+                            <label className="block text-xs font-bold text-gray-400 dark:text-slate-500 uppercase mb-1">Ціна квитка ТУДИ (грн)</label>
+                            <input type="number" value={defaults.busPriceTo} onChange={e => setDefaults({...defaults, busPriceTo: Number(e.target.value)})} className="w-full p-3 border border-gray-200 dark:border-slate-600 rounded-lg font-bold text-gray-700 dark:text-white dark:bg-slate-700 focus:border-blue-500 outline-none" placeholder="0" />
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Ціна квитка НАЗАД (грн)</label>
-                            <input type="number" value={defaults.busPriceFrom} onChange={e => setDefaults({...defaults, busPriceFrom: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-lg font-bold text-gray-700 focus:border-blue-500 outline-none" placeholder="0" />
+                            <label className="block text-xs font-bold text-gray-400 dark:text-slate-500 uppercase mb-1">Ціна квитка НАЗАД (грн)</label>
+                            <input type="number" value={defaults.busPriceFrom} onChange={e => setDefaults({...defaults, busPriceFrom: Number(e.target.value)})} className="w-full p-3 border border-gray-200 dark:border-slate-600 rounded-lg font-bold text-gray-700 dark:text-white dark:bg-slate-700 focus:border-blue-500 outline-none" placeholder="0" />
                         </div>
                     </div>
                     )}
@@ -529,7 +559,7 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
             <div className="flex justify-end pt-2">
             <button 
                 onClick={handleSave}
-                className="bg-slate-900 text-white px-8 py-3.5 rounded-xl font-bold shadow-lg shadow-slate-200 hover:bg-slate-800 transition-all active:scale-[0.98] flex items-center"
+                className="bg-slate-900 dark:bg-slate-700 text-white px-8 py-3.5 rounded-xl font-bold shadow-lg shadow-slate-200 dark:shadow-none hover:bg-slate-800 dark:hover:bg-slate-600 transition-all active:scale-[0.98] flex items-center"
             >
                 <Save size={20} className="mr-2" /> Зберегти зміни
             </button>
@@ -541,45 +571,45 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
       {activeTab === 'access' && (
           // ... (Same as before)
           <div className="space-y-6 animate-fade-in">
-              <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6 flex flex-col md:flex-row gap-4 items-end">
+              <div className="bg-gray-50 dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 mb-6 flex flex-col md:flex-row gap-4 items-end transition-colors">
                   <div className="flex-grow w-full">
-                      <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Створити новий профіль (Роль)</label>
-                      <input type="text" className="border border-gray-300 p-2 rounded-lg w-full focus:ring-2 focus:ring-green-500 outline-none" placeholder="Назва ролі (напр. Комірник, ОТК)" value={newRoleName} onChange={e => setNewRoleName(e.target.value)}/>
+                      <label className="block text-xs font-bold text-gray-500 dark:text-slate-400 uppercase mb-1">Створити новий профіль (Роль)</label>
+                      <input type="text" className="border border-gray-300 dark:border-slate-600 p-2 rounded-lg w-full focus:ring-2 focus:ring-green-500 outline-none dark:bg-slate-700 dark:text-white" placeholder="Назва ролі (напр. Комірник, ОТК)" value={newRoleName} onChange={e => setNewRoleName(e.target.value)}/>
                   </div>
                   <button onClick={handleAddRole} disabled={!newRoleName.trim() || isPermissionsSaving} className="bg-green-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-green-700 h-[42px] disabled:opacity-50 flex items-center justify-center shrink-0 w-full md:w-auto transition-colors shadow-sm"><Plus size={18} className="mr-1" /> Додати</button>
               </div>
 
-              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+              <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm transition-colors">
                   <div className="flex items-center justify-between mb-6">
                       <div className="flex items-center space-x-4">
-                          <label className="text-sm font-bold text-gray-700">Оберіть роль:</label>
-                          <select value={activeAccessRole} onChange={(e) => setActiveAccessRole(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 font-bold min-w-[200px]">
+                          <label className="text-sm font-bold text-gray-700 dark:text-slate-200">Оберіть роль:</label>
+                          <select value={activeAccessRole} onChange={(e) => setActiveAccessRole(e.target.value)} className="bg-gray-50 dark:bg-slate-700 border border-gray-200 dark:border-slate-600 text-gray-900 dark:text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 font-bold min-w-[200px]">
                               <option value="worker">Працівник (Default)</option>
                               {roles.filter(r => r.id !== 'worker').map(r => (<option key={r.id} value={r.id}>{r.name}</option>))}
                           </select>
                       </div>
-                      <button onClick={handleSavePermissions} disabled={isPermissionsSaving} className="bg-slate-900 text-white px-6 py-2 rounded-lg font-bold hover:bg-slate-800 flex items-center disabled:opacity-50 transition-colors shadow-lg">
+                      <button onClick={handleSavePermissions} disabled={isPermissionsSaving} className="bg-slate-900 dark:bg-slate-700 text-white px-6 py-2 rounded-lg font-bold hover:bg-slate-800 dark:hover:bg-slate-600 flex items-center disabled:opacity-50 transition-colors shadow-lg">
                           {isPermissionsSaving ? <Loader size={16} className="animate-spin mr-2"/> : <Save size={16} className="mr-2"/>} Зберегти права
                       </button>
                   </div>
 
-                  <div className="overflow-hidden rounded-lg border border-gray-200">
-                      <table className="min-w-full divide-y divide-gray-200">
-                          <thead className="bg-gray-50">
+                  <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-slate-700">
+                      <table className="min-w-full divide-y divide-gray-200 dark:divide-slate-700">
+                          <thead className="bg-gray-50 dark:bg-slate-900/50">
                               <tr>
-                                  <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Розділ / Вкладка</th>
-                                  <th scope="col" className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-32">Доступ (View)</th>
-                                  <th scope="col" className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider w-32">Редагування (Edit)</th>
+                                  <th scope="col" className="px-6 py-3 text-left text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Розділ / Вкладка</th>
+                                  <th scope="col" className="px-6 py-3 text-center text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider w-32">Доступ (View)</th>
+                                  <th scope="col" className="px-6 py-3 text-center text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider w-32">Редагування (Edit)</th>
                               </tr>
                           </thead>
-                          <tbody className="bg-white divide-y divide-gray-200">
+                          <tbody className="bg-white dark:bg-slate-800 divide-y divide-gray-200 dark:divide-slate-700">
                               {MODULES.map(module => {
                                   const rolePerms = currentRoleConfig?.permissions || {};
                                   const modPerm = rolePerms[module.key] || { view: false, edit: false };
                                   const isChild = !!module.parent;
                                   return (
-                                      <tr key={module.key} className="hover:bg-gray-50">
-                                          <td className={`px-6 py-4 whitespace-nowrap text-sm ${isChild ? 'pl-10 text-gray-600' : 'font-bold text-gray-900'}`}>{isChild && <CornerDownRight size={14} className="inline mr-2 text-gray-400"/>}{module.label}</td>
+                                      <tr key={module.key} className="hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
+                                          <td className={`px-6 py-4 whitespace-nowrap text-sm ${isChild ? 'pl-10 text-gray-600 dark:text-slate-400' : 'font-bold text-gray-900 dark:text-white'}`}>{isChild && <CornerDownRight size={14} className="inline mr-2 text-gray-400"/>}{module.label}</td>
                                           <td className="px-6 py-4 whitespace-nowrap text-center"><input type="checkbox" className="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer" checked={modPerm.view} onChange={() => togglePermission(activeAccessRole, module.key, 'view')}/></td>
                                           <td className="px-6 py-4 whitespace-nowrap text-center"><input type="checkbox" className="w-5 h-5 text-green-600 rounded border-gray-300 focus:ring-green-500 cursor-pointer" checked={modPerm.edit} onChange={() => togglePermission(activeAccessRole, module.key, 'edit')} disabled={!modPerm.view}/></td>
                                       </tr>
@@ -594,29 +624,29 @@ export const Settings: React.FC<SettingsProps> = ({ currentUser }) => {
 
       {/* --- TRASH TAB --- */}
       {activeTab === 'trash' && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden min-h-[500px] flex flex-col animate-fade-in">
-            <div className="bg-gray-50 border-b border-gray-100 flex justify-between items-center p-2">
+        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700 overflow-hidden min-h-[500px] flex flex-col animate-fade-in transition-colors">
+            <div className="bg-gray-50 dark:bg-slate-900/50 border-b border-gray-100 dark:border-slate-700 flex justify-between items-center p-2">
                <div className="flex gap-1 overflow-x-auto">
-                  <button onClick={() => setActiveTrashTab('task')} className={`px-3 py-2 rounded-lg text-sm font-bold flex items-center ${activeTrashTab === 'task' ? 'bg-white shadow text-slate-900' : 'text-gray-500 hover:text-gray-700'}`}><ClipboardList size={16} className="mr-2"/> Завдання</button>
-                  <button onClick={() => setActiveTrashTab('order')} className={`px-3 py-2 rounded-lg text-sm font-bold flex items-center ${activeTrashTab === 'order' ? 'bg-white shadow text-slate-900' : 'text-gray-500 hover:text-gray-700'}`}><ShoppingCart size={16} className="mr-2"/> Замовлення</button>
-                  <button onClick={() => setActiveTrashTab('product')} className={`px-3 py-2 rounded-lg text-sm font-bold flex items-center ${activeTrashTab === 'product' ? 'bg-white shadow text-slate-900' : 'text-gray-500 hover:text-gray-700'}`}><Box size={16} className="mr-2"/> Вироби</button>
-                  <button onClick={() => setActiveTrashTab('cycle')} className={`px-3 py-2 rounded-lg text-sm font-bold flex items-center ${activeTrashTab === 'cycle' ? 'bg-white shadow text-slate-900' : 'text-gray-500 hover:text-gray-700'}`}><Folder size={16} className="mr-2"/> Цикли</button>
-                  <button onClick={() => setActiveTrashTab('setupMap')} className={`px-3 py-2 rounded-lg text-sm font-bold flex items-center ${activeTrashTab === 'setupMap' ? 'bg-white shadow text-slate-900' : 'text-gray-500 hover:text-gray-700'}`}><Wrench size={16} className="mr-2"/> Карти</button>
+                  <button onClick={() => setActiveTrashTab('task')} className={`px-3 py-2 rounded-lg text-sm font-bold flex items-center ${activeTrashTab === 'task' ? 'bg-white dark:bg-slate-700 shadow text-slate-900 dark:text-white' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-300'}`}><ClipboardList size={16} className="mr-2"/> Завдання</button>
+                  <button onClick={() => setActiveTrashTab('order')} className={`px-3 py-2 rounded-lg text-sm font-bold flex items-center ${activeTrashTab === 'order' ? 'bg-white dark:bg-slate-700 shadow text-slate-900 dark:text-white' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-300'}`}><ShoppingCart size={16} className="mr-2"/> Замовлення</button>
+                  <button onClick={() => setActiveTrashTab('product')} className={`px-3 py-2 rounded-lg text-sm font-bold flex items-center ${activeTrashTab === 'product' ? 'bg-white dark:bg-slate-700 shadow text-slate-900 dark:text-white' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-300'}`}><Box size={16} className="mr-2"/> Вироби</button>
+                  <button onClick={() => setActiveTrashTab('cycle')} className={`px-3 py-2 rounded-lg text-sm font-bold flex items-center ${activeTrashTab === 'cycle' ? 'bg-white dark:bg-slate-700 shadow text-slate-900 dark:text-white' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-300'}`}><Folder size={16} className="mr-2"/> Цикли</button>
+                  <button onClick={() => setActiveTrashTab('setupMap')} className={`px-3 py-2 rounded-lg text-sm font-bold flex items-center ${activeTrashTab === 'setupMap' ? 'bg-white dark:bg-slate-700 shadow text-slate-900 dark:text-white' : 'text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-300'}`}><Wrench size={16} className="mr-2"/> Карти</button>
                </div>
             </div>
             <div className="flex-1 overflow-y-auto">
                {isTrashLoading ? (
                    <div className="flex justify-center items-center h-40"><Loader className="animate-spin text-gray-300"/></div>
                ) : (
-                   <div className="divide-y divide-gray-100">
+                   <div className="divide-y divide-gray-100 dark:divide-slate-700">
                         {trashItems.length === 0 && <div className="flex flex-col items-center justify-center py-20 text-gray-400"><Trash2 size={48} className="mb-4 opacity-20"/><p>Кошик порожній</p></div>}
                         {trashItems.map((item) => (
-                            <div key={item.id} className="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                            <div key={item.id} className="p-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-slate-700/50 transition-colors">
                                 <div className="flex items-center">
-                                    <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center mr-4 border border-gray-200"><Trash2 size={18} className="text-gray-400"/></div>
+                                    <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-slate-700 flex items-center justify-center mr-4 border border-gray-200 dark:border-slate-600"><Trash2 size={18} className="text-gray-400"/></div>
                                     <div>
-                                        <div className="font-bold text-gray-900">{item.title || item.name || item.orderNumber || 'Без назви'}</div>
-                                        <div className="text-xs text-gray-400 flex items-center"><span className="uppercase font-bold mr-2 text-red-300">{activeTrashTab}</span><span>Видалено: {item.deletedAt ? new Date(item.deletedAt).toLocaleString('uk-UA') : 'Unknown'}</span></div>
+                                        <div className="font-bold text-gray-900 dark:text-white">{item.title || item.name || item.orderNumber || 'Без назви'}</div>
+                                        <div className="text-xs text-gray-400 flex items-center"><span className="uppercase font-bold mr-2 text-red-300">TRASH: {activeTrashTab}</span><span>Видалено: {item.deletedAt ? new Date(item.deletedAt).toLocaleString('uk-UA') : 'Unknown'}</span></div>
                                     </div>
                                 </div>
                                 <div className="flex gap-2">

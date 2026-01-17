@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Bell, Check, AlertTriangle, Info, CheckCircle, Trash2 } from 'lucide-react';
 import { db } from '../services/firebase';
-import { collection, query, orderBy, limit, onSnapshot, doc, updateDoc, writeBatch } from 'firebase/firestore';
-import { User } from '../types';
+import { collection, query, orderBy, limit, onSnapshot, doc, updateDoc, writeBatch, where } from 'firebase/firestore';
+import { User, Notification } from '../types';
 
 interface NotificationBellProps {
   currentUser: User;
@@ -11,47 +11,49 @@ interface NotificationBellProps {
 }
 
 export const NotificationBell: React.FC<NotificationBellProps> = ({ currentUser, variant = 'default' }) => {
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
-  // 1. ROBUST DATA FETCHING
+  // 1. DATA FETCHING (Real-time with Server-Side Filtering)
   useEffect(() => {
     if (!currentUser) return;
 
-    // Simple Query: Fetch last 50 notifications sorted by time.
-    // No 'where' clauses that might trigger index errors.
-    const q = query(
-        collection(db, 'notifications'),
-        orderBy('createdAt', 'desc'),
-        limit(50)
-    );
+    let q;
+
+    if (currentUser.role === 'admin') {
+        // ADMIN QUERY: Matches the index `target` (Asc) + `createdAt` (Desc)
+        // We look for notifications specifically for 'admin' OR 'global' broadcasts.
+        q = query(
+            collection(db, 'notifications'),
+            where('target', 'in', ['admin', 'global']),
+            orderBy('createdAt', 'desc'),
+            limit(50)
+        );
+    } else {
+        // WORKER QUERY: Matches index `userId` (Asc) + `createdAt` (Desc)
+        // Workers only see their own notifications.
+        q = query(
+            collection(db, 'notifications'),
+            where('userId', '==', currentUser.id),
+            orderBy('createdAt', 'desc'),
+            limit(50)
+        );
+    }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
         try {
-            const allNotes = snapshot.docs.map(doc => ({
+            const fetchedNotes = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
-            }));
+            })) as Notification[];
 
-            // 2. CLIENT-SIDE FILTERING (The "Bulletproof" part)
-            const filteredNotes = allNotes.filter((note: any) => {
-                // Show if specifically for this user
-                const isForMe = note.userId === currentUser.id;
-                // Show if for 'admin' role (if supported) and user is admin
-                const isForAdmin = (note.to === 'admin' || note.userId === 'admin') && currentUser.role === 'admin';
-                // Show if global
-                const isGlobal = note.to === 'global';
-                
-                return isForMe || isForAdmin || isGlobal;
-            });
-
-            setNotifications(filteredNotes);
+            setNotifications(fetchedNotes);
             
             // Count unread
-            const unread = filteredNotes.filter((n: any) => !n.read).length;
+            const unread = fetchedNotes.filter((n) => !n.read).length;
             setUnreadCount(unread);
             setError(null);
         } catch (err) {
@@ -60,8 +62,13 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ currentUser,
         }
     }, (err) => {
         console.error("Notification Access Error:", err);
-        // Silently fail or show small indicator, don't crash app
-        setError("Немає доступу");
+        // This often happens if the specific composite index is missing in Firestore.
+        // Check the browser console for a direct link to create the index.
+        if (err.message.includes("requires an index")) {
+            setError("Потрібен індекс (див. консоль)");
+        } else {
+            setError("Немає доступу");
+        }
     });
 
     return () => unsubscribe();
@@ -116,7 +123,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ currentUser,
       >
         <Bell size={20} />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white">
+          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white animate-pulse">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
@@ -137,11 +144,11 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ currentUser,
             )}
           </div>
           
-          <div className="max-h-80 overflow-y-auto">
+          <div className="max-h-80 overflow-y-auto custom-scrollbar">
             {error && (
                  <div className="p-4 text-center text-red-500 text-xs flex flex-col items-center">
                     <AlertTriangle className="mb-1" size={16}/>
-                    {error}. Перевірте з'єднання.
+                    {error}
                 </div>
             )}
 
@@ -164,7 +171,8 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ currentUser,
                 </div>
                 
                 <div className="flex-1 min-w-0">
-                  <p className={`text-sm leading-tight ${!n.read ? 'font-bold text-gray-900' : 'text-gray-600'}`}>
+                  {n.title && <p className="text-xs font-bold text-gray-800 mb-0.5">{n.title}</p>}
+                  <p className={`text-sm leading-tight ${!n.read && !n.title ? 'font-bold text-gray-900' : 'text-gray-600'}`}>
                       {n.message}
                   </p>
                   <span className="text-[10px] text-gray-400 mt-1 block">
