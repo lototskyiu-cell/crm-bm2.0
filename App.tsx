@@ -175,9 +175,7 @@ const App: React.FC = () => {
           <div 
               className="fixed inset-0 z-[-1] bg-cover bg-center transition-all duration-500"
               style={{ 
-                  backgroundImage: `url(${globalBackground})`,
-                  filter: 'blur(10px) brightness(0.7)', 
-                  transform: 'scale(1.02)' 
+                  backgroundImage: `url(${globalBackground})`
               }}
           />
       ) : null
@@ -239,3 +237,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+    
