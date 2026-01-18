@@ -1,3 +1,4 @@
+
 import { db } from "./firebase";
 import { 
   collection, 
@@ -1124,9 +1125,18 @@ const ApiService = {
   // --- WORK STORAGE / CYCLES ---
 
   subscribeToWorkStorage(parentId: string | null, callback: (items: (JobFolder | JobCycle)[]) => void): () => void {
-      const q = query(collection(db, WORK_STORAGE_COLLECTION), where("parentId", "==", parentId || 'root'));
+      let q;
+      // Handle 'root' view: fetch items explicitly marked 'root' OR items with no parent (null)
+      if (!parentId || parentId === 'root') {
+          q = query(collection(db, WORK_STORAGE_COLLECTION), where("parentId", "in", ['root', null]));
+      } else {
+          // Handle specific folder view
+          q = query(collection(db, WORK_STORAGE_COLLECTION), where("parentId", "==", parentId));
+      }
+      
       return onSnapshot(q, (snapshot) => {
-          const items = snapshot.docs.map(d => ({id: d.id, ...d.data()} as (JobFolder | JobCycle)));
+          // FIX: Spread data first, then overwrite ID with doc.id to ensure valid ID
+          const items = snapshot.docs.map(d => ({...d.data(), id: d.id} as (JobFolder | JobCycle)));
           callback(items);
       }, (e) => handleFirestoreError(e, 'subscribeToWorkStorage'));
   },
@@ -1134,7 +1144,8 @@ const ApiService = {
   async getWorkStorageItem(id: string): Promise<JobFolder | JobCycle | null> {
       try {
           const d = await getDoc(doc(db, WORK_STORAGE_COLLECTION, id));
-          return d.exists() ? ({id: d.id, ...d.data()} as JobFolder | JobCycle) : null;
+          // FIX: Spread data first, then overwrite ID with doc.id
+          return d.exists() ? ({...d.data(), id: d.id} as JobFolder | JobCycle) : null;
       } catch(e) { return null; }
   },
 
@@ -1165,7 +1176,8 @@ const ApiService = {
       try {
           const q = query(collection(db, WORK_STORAGE_COLLECTION), where("productId", "==", productId));
           const snap = await getDocs(q);
-          return snap.docs.map(d => ({id: d.id, ...d.data()} as JobCycle));
+          // FIX: Spread data first, then overwrite ID with doc.id
+          return snap.docs.map(d => ({...d.data(), id: d.id} as JobCycle));
       } catch(e) { return []; }
   },
 

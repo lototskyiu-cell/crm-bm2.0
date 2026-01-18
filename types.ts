@@ -290,7 +290,7 @@ export interface Order {
 
 export interface JobCycle {
   id: string;
-  folderId: string | null;
+  parentId: string | null; // Renamed from folderId for consistency
   name: string;
   productId?: string;
   productPhoto?: string;

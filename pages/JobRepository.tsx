@@ -62,7 +62,6 @@ export const JobRepository: React.FC<JobRepositoryProps> = ({ onSelectCycle }) =
       setBreadcrumbs(breadcrumbs.slice(0, index + 1));
   };
 
-  // ... (Keep existing CRUD handlers) ...
   const handleCreate = async () => {
     if (!newItemName) return;
     if (isSubmitting) return;
@@ -88,7 +87,7 @@ export const JobRepository: React.FC<JobRepositoryProps> = ({ onSelectCycle }) =
 
             const newCycle: JobCycle = {
                 id: editingId || '',
-                folderId: currentFolderId,
+                parentId: currentFolderId, 
                 name: newItemName,
                 productId: selectedProductId,
                 productPhoto: product?.photo,
@@ -130,11 +129,14 @@ export const JobRepository: React.FC<JobRepositoryProps> = ({ onSelectCycle }) =
 
   const performDelete = async () => {
     if (!deleteConfirmation) return;
+    
     setIsDeleting(true);
+    
     try {
         await API.deleteWorkStorageItem(deleteConfirmation.id);
         setDeleteConfirmation(null);
     } catch (e) {
+        console.error(e);
         alert("Error deleting item");
     } finally {
         setIsDeleting(false);
@@ -156,9 +158,11 @@ export const JobRepository: React.FC<JobRepositoryProps> = ({ onSelectCycle }) =
     setIsModalOpen(true);
   };
 
+  const visibleItems = items.filter(i => !i.deletedAt);
+
   const filteredItems = selectedColorFilter 
-    ? items.filter(i => i.colorTag === selectedColorFilter)
-    : items;
+    ? visibleItems.filter(i => i.colorTag === selectedColorFilter)
+    : visibleItems;
 
   const folders = filteredItems.filter(i => !('stages' in i));
   const cycles = filteredItems.filter(i => 'stages' in i);
@@ -223,17 +227,17 @@ export const JobRepository: React.FC<JobRepositoryProps> = ({ onSelectCycle }) =
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
           {folders.map(folder => (
             <div key={folder.id} className="group relative">
-                <button 
-                onClick={() => handleNavigate(folder.id, folder.name)}
-                className="w-full flex flex-col items-center p-6 bg-white rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all animate-fade-in"
+                <div 
+                    onClick={() => handleNavigate(folder.id, folder.name)}
+                    className="w-full flex flex-col items-center p-6 bg-white rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all cursor-pointer animate-fade-in z-0 relative overflow-hidden"
                 >
-                <div className="relative mb-3">
-                    <Folder size={48} className="text-blue-100 group-hover:text-blue-200 transition-colors" style={{ color: folder.colorTag ? `${folder.colorTag}40` : undefined }} />
-                    <Folder size={48} className="absolute inset-0 text-blue-200 group-hover:text-blue-500 transition-colors opacity-50" style={{ color: folder.colorTag }} />
+                    <div className="relative mb-3">
+                        <Folder size={48} className="text-blue-100 group-hover:text-blue-200 transition-colors" style={{ color: folder.colorTag ? `${folder.colorTag}40` : undefined }} />
+                        <Folder size={48} className="absolute inset-0 text-blue-200 group-hover:text-blue-500 transition-colors opacity-50" style={{ color: folder.colorTag }} />
+                    </div>
+                    <span className="font-medium text-gray-700 text-center">{folder.name}</span>
                 </div>
-                <span className="font-medium text-gray-700 text-center">{folder.name}</span>
-                </button>
-                <div className="absolute top-2 right-2 flex gap-1">
+                <div className="absolute top-2 right-2 flex gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={(e) => handleEdit(e, 'folder', folder)} className="p-1 bg-white rounded shadow hover:text-blue-600 border border-gray-100"><Pencil size={14}/></button>
                     <button onClick={(e) => handleDeleteClick(e, 'folder', folder.id, folder.name)} className="p-1 bg-white rounded shadow hover:text-red-600 border border-gray-100"><Trash2 size={14}/></button>
                 </div>
@@ -244,23 +248,26 @@ export const JobRepository: React.FC<JobRepositoryProps> = ({ onSelectCycle }) =
             const cycle = cycleItem as JobCycle;
             return (
                 <div key={cycle.id} className="group relative">
-                    <button 
-                    onClick={() => onSelectCycle(cycle.id)}
-                    className="w-full flex flex-col items-center p-6 bg-white rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all relative overflow-hidden animate-fade-in"
+                    <div 
+                        onClick={() => onSelectCycle(cycle.id)}
+                        className="w-full flex flex-col items-center p-6 bg-white rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-lg transition-all relative overflow-hidden animate-fade-in cursor-pointer z-0"
+                        role="button"
+                        tabIndex={0}
                     >
-                    {cycle.colorTag && (
-                        <div className="absolute top-0 right-0 w-3 h-3 m-2 rounded-full" style={{ backgroundColor: cycle.colorTag }} />
-                    )}
-                    <div className="w-16 h-16 bg-gray-100 rounded-lg mb-3 flex items-center justify-center overflow-hidden">
-                        {cycle.productPhoto ? (
-                        <img src={cycle.productPhoto} alt="" className="w-full h-full object-cover" />
-                        ) : (
-                        <FileText size={32} className="text-gray-400" />
+                        {cycle.colorTag && (
+                            <div className="absolute top-0 right-0 w-3 h-3 m-2 rounded-full" style={{ backgroundColor: cycle.colorTag }} />
                         )}
+                        <div className="w-16 h-16 bg-gray-100 rounded-lg mb-3 flex items-center justify-center overflow-hidden">
+                            {cycle.productPhoto ? (
+                            <img src={cycle.productPhoto} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                            <FileText size={32} className="text-gray-400" />
+                            )}
+                        </div>
+                        <span className="font-medium text-gray-700 text-center text-sm line-clamp-2">{cycle.name}</span>
                     </div>
-                    <span className="font-medium text-gray-700 text-center text-sm">{cycle.name}</span>
-                    </button>
-                    <div className="absolute top-2 right-2 flex gap-1">
+                    
+                    <div className="absolute top-2 right-2 flex gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={(e) => handleEdit(e, 'cycle', cycle)} className="p-1 bg-white rounded shadow hover:text-blue-600 border border-gray-100"><Pencil size={14}/></button>
                         <button onClick={(e) => handleDeleteClick(e, 'cycle', cycle.id, cycle.name)} className="p-1 bg-white rounded shadow hover:text-red-600 border border-gray-100"><Trash2 size={14}/></button>
                     </div>
@@ -383,6 +390,7 @@ export const JobRepository: React.FC<JobRepositoryProps> = ({ onSelectCycle }) =
             onClose={() => setDeleteConfirmation(null)}
             onConfirm={performDelete}
             isDeleting={isDeleting}
+            confirmText={isDeleting ? "Видалення..." : "Видалити"}
         />
       )}
     </div>

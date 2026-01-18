@@ -122,7 +122,7 @@ class MockStoreService {
       else this.folders.push(folder);
   }
   
-  getCycles(folderId: string | null) { return this.cycles.filter(c => c.folderId === folderId && !c.deletedAt); }
+  getCycles(parentId: string | null) { return this.cycles.filter(c => c.parentId === parentId && !c.deletedAt); }
   getCycle(id: string) { return this.cycles.find(c => c.id === id); }
   saveCycle(cycle: JobCycle) {
       const idx = this.cycles.findIndex(c => c.id === cycle.id);
