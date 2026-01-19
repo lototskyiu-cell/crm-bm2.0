@@ -1,3 +1,4 @@
+
 import { db } from "./firebase";
 import { 
   collection, 
@@ -656,6 +657,25 @@ const ApiService = {
       }
     } catch (error) {
       handleFirestoreError(error, 'saveTool');
+      throw error;
+    }
+  },
+
+  // Added missing subscribeToToolFolders method
+  subscribeToToolFolders(type: 'catalog' | 'warehouse' | 'production', callback: (folders: ToolFolder[]) => void): () => void {
+    const q = query(collection(db, TOOL_FOLDERS_COLLECTION), where("type", "==", type));
+    return onSnapshot(q, (snapshot) => {
+      callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ToolFolder)));
+    }, (error) => handleFirestoreError(error, 'subscribeToToolFolders'));
+  },
+
+  // Added missing saveToolFolder method
+  async saveToolFolder(folder: ToolFolder): Promise<void> {
+    try {
+      const data = sanitizeForFirestore(folder);
+      await setDoc(doc(db, TOOL_FOLDERS_COLLECTION, folder.id), data, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, 'saveToolFolder');
       throw error;
     }
   },

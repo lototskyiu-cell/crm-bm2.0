@@ -1,8 +1,22 @@
 
 import React, { useState, useEffect } from 'react';
-import { store } from '../services/mockStore';
+import { 
+  doc, 
+  getDoc, 
+  getDocs, 
+  collection, 
+  setDoc, 
+  writeBatch, 
+  increment, 
+  serverTimestamp,
+  query,
+  orderBy,
+  limit,
+  onSnapshot
+} from "firebase/firestore";
+import { db } from "../services/firebase";
 import { API } from '../services/api'; 
-import { Tool, ToolFolder, WarehouseItem, ProductionItem, ToolTransaction, User, UnitOfMeasure } from '../types';
+import { Tool, ToolFolder, ToolTransaction, User, UnitOfMeasure } from '../types';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { uploadFileToCloudinary } from '../services/cloudinary';
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal';
@@ -25,12 +39,8 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
   const [currentWarehouseFolderId, setCurrentWarehouseFolderId] = useState<string | null>(null);
   const [currentProductionFolderId, setCurrentProductionFolderId] = useState<string | null>(null);
 
-  const [tools, setTools] = useState<Tool[]>([]);
-  const [catalogFolders, setCatalogFolders] = useState<ToolFolder[]>([]);
-  const [warehouseFolders, setWarehouseFolders] = useState<ToolFolder[]>([]);
-  const [productionFolders, setProductionFolders] = useState<ToolFolder[]>([]);
-  const [warehouseItems, setWarehouseItems] = useState<WarehouseItem[]>([]);
-  const [productionItems, setProductionItems] = useState<ProductionItem[]>([]);
+  const [items, setItems] = useState<any[]>([]); 
+  const [allFolders, setAllFolders] = useState<ToolFolder[]>([]);
   const [transactions, setTransactions] = useState<ToolTransaction[]>([]);
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -51,605 +61,331 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
   const [isUsageModalOpen, setIsUsageModalOpen] = useState(false);
   const [usageOp, setUsageOp] = useState<{ itemId: string, qty: number, note: string }>({ itemId: '', qty: 1, note: '' });
 
-  const [clipboard, setClipboard] = useState<{ type: 'tool' | 'folder' | 'warehouseItem' | 'productionItem', id: string, op: 'cut' | 'copy' } | null>(null);
+  const [isItemEditModalOpen, setIsItemEditModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<any>(null);
 
-  const [isAddToWarehouseOpen, setIsAddToWarehouseOpen] = useState(false);
-  const [isAddToProductionOpen, setIsAddToProductionOpen] = useState(false);
-  const [selectedToolId, setSelectedToolId] = useState('');
-  const [addStockQty, setAddStockQty] = useState<number>(1);
-  const [addStockCritical, setAddStockCritical] = useState<number>(5);
-
-  const [draggedItem, setDraggedItem] = useState<{ type: 'tool' | 'folder' | 'warehouseItem' | 'productionItem', id: string } | null>(null);
-  
   const [deleteConfirm, setDeleteConfirm] = useState<{isOpen: boolean, type: 'tool' | 'folder', id: string} | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isActionInProgress, setIsActionInProgress] = useState(false);
+
+  // --- 1. FETCH ITEMS (Fail-Safe Logic with Maps) ---
+  const fetchItems = async () => {
+    setIsLoading(true);
+    try {
+      // Завантажуємо дані з 3-х колекцій паралельно
+      const [catSnap, whSnap, prSnap] = await Promise.all([
+        getDocs(collection(db, 'toolCatalog')),
+        getDocs(collection(db, 'toolWarehouse')),
+        getDocs(collection(db, 'toolProduction'))
+      ]);
+
+      // Створюємо мапи залишків для швидкого пошуку за ID
+      const whMap = new Map(whSnap.docs.map(d => [d.id, d.data().quantity || 0]));
+      const prMap = new Map(prSnap.docs.map(d => [d.id, d.data().quantity || 0]));
+
+      // Об'єднуємо дані каталогу із залишками (fail-safe: якщо ID немає в мапі, ставимо 0)
+      const combinedItems = catSnap.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          quantity: whMap.get(doc.id) || 0,
+          productionQuantity: prMap.get(doc.id) || 0,
+          photo: data.photoUrl || data.photo || ''
+        };
+      });
+
+      setItems(combinedItems);
+    } catch (error) {
+      console.error("Помилка завантаження даних:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    refreshData();
-  }, [currentCatalogFolderId, currentWarehouseFolderId, currentProductionFolderId, activeTab]);
+    fetchItems();
+    
+    // Підписки на допоміжні дані (папки та транзакції)
+    const unsubCatFolders = API.subscribeToToolFolders('catalog', (data) => setAllFolders(prev => [...prev.filter(f => f.type !== 'catalog'), ...data]));
+    const unsubWhFolders = API.subscribeToToolFolders('warehouse', (data) => setAllFolders(prev => [...prev.filter(f => f.type !== 'warehouse'), ...data]));
+    const unsubProdFolders = API.subscribeToToolFolders('production', (data) => setAllFolders(prev => [...prev.filter(f => f.type !== 'production'), ...data]));
+    
+    const qTx = query(collection(db, 'toolTransactions'), orderBy('date', 'desc'), limit(100));
+    const unsubTx = onSnapshot(qTx, (s) => setTransactions(s.docs.map(d => ({id: d.id, ...d.data()} as ToolTransaction))));
 
-  useEffect(() => {
-    const unsubscribe = API.subscribeToTools((data) => {
-        setTools(data);
-    });
-    return () => unsubscribe();
+    return () => { unsubCatFolders(); unsubWhFolders(); unsubProdFolders(); unsubTx(); };
   }, []);
 
-  useEffect(() => {
-    setSearchTerm('');
-    setSelectedColor(null);
-  }, [activeTab]);
-
-  const refreshData = () => {
-    setCatalogFolders([...store.getToolFolders('catalog', currentCatalogFolderId)]);
-    setWarehouseFolders([...store.getToolFolders('warehouse', currentWarehouseFolderId)]);
-    setProductionFolders([...store.getToolFolders('production', currentProductionFolderId)]);
-    setWarehouseItems([...store.getWarehouseItems(currentWarehouseFolderId)]);
-    setProductionItems([...store.getProductionItems(currentProductionFolderId)]);
-    setTransactions([...store.getTransactions()]);
-  };
-
-  const getBreadcrumbName = (id: string | null, type: 'catalog' | 'warehouse' | 'production') => {
-      if (!id) {
-          if (type === 'catalog') return 'Root';
-          if (type === 'warehouse') return 'Головний склад';
-          return 'Виробництво (Цех)';
-      }
-      const folder = store.toolFolders.find(f => f.id === id);
-      return folder ? folder.name : '...';
-  };
-
-  const handleExportInventory = () => {
-    let itemsToExport: any[] = [];
-    const headers = ["Назва", "Одиниця", "Кількість", "Критичний поріг", "Статус"];
-
-    if (activeTab === 'warehouse') {
-        const filtered = filterItems(warehouseItems);
-        itemsToExport = filtered.map(item => {
-            const wItem = item as WarehouseItem;
-            const t = tools.find(tool => tool.id === wItem.toolId);
-            const status = wItem.quantity <= wItem.criticalQuantity ? "КРИТИЧНО" : (wItem.quantity <= wItem.criticalQuantity * 1.5 ? "МАЛО" : "OK");
-            return { name: t?.name || '?', unit: t?.unit || '?', qty: wItem.quantity, crit: wItem.criticalQuantity, status };
-        });
-    } else if (activeTab === 'production') {
-        const filtered = filterItems(productionItems);
-        itemsToExport = filtered.map(item => {
-            const pItem = item as ProductionItem;
-            const t = tools.find(tool => tool.id === pItem.toolId);
-            const status = pItem.quantity <= pItem.criticalQuantity ? "КРИТИЧНО" : "OK";
-            return { name: t?.name || '?', unit: t?.unit || '?', qty: pItem.quantity, crit: pItem.criticalQuantity, status };
-        });
-    } else if (activeTab === 'catalog') {
-        const filtered = filterTools(tools.filter(t => t.folderId === currentCatalogFolderId));
-        itemsToExport = filtered.map(t => ({
-            name: t.name, unit: t.unit, qty: '-', crit: '-', status: '-'
-        }));
-    }
-
-    if (itemsToExport.length === 0) {
-      alert("Немає даних для експорту");
-      return;
-    }
-
-    const rows = itemsToExport.map(item => {
-      const safeName = (item.name || "").replace(/;/g, ",");
-      return `${safeName};${item.unit};${item.qty};${item.crit};${item.status}`;
-    });
-
-    const csvContent = "\uFEFF" + [headers.join(";"), ...rows].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `inventory_${activeTab}_${new Date().toISOString().slice(0,10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   const openNewFolderModal = () => {
-      setFolderForm({ id: null, name: '', color: '#3b82f6' });
-      setIsFolderModalOpen(true);
+    setFolderForm({ id: null, name: '', color: '#3b82f6' });
+    setIsFolderModalOpen(true);
   };
 
-  const handleEditFolder = (e: React.MouseEvent, folder: ToolFolder) => {
-      e.stopPropagation();
-      setFolderForm({ id: folder.id, name: folder.name, color: folder.colorTag || '#3b82f6' });
-      setIsFolderModalOpen(true);
+  const confirmDelete = async () => {
+    if (!deleteConfirm || isDeleting) return;
+    setIsDeleting(true);
+    try {
+        if (deleteConfirm.type === 'tool') {
+            const batch = writeBatch(db);
+            batch.delete(doc(db, 'toolCatalog', deleteConfirm.id));
+            batch.delete(doc(db, 'toolWarehouse', deleteConfirm.id));
+            batch.delete(doc(db, 'toolProduction', deleteConfirm.id));
+            await batch.commit();
+        } else {
+            await API.deleteToolFolder(deleteConfirm.id);
+        }
+        setDeleteConfirm(null);
+        fetchItems();
+    } catch (e) {
+        alert("Помилка видалення");
+    } finally {
+        setIsDeleting(false);
+    }
   };
 
-  const handleSaveFolder = () => {
-      if (!folderForm.name) return;
-      
-      let type: 'catalog' | 'warehouse' | 'production' = 'catalog';
-      let parentId: string | null = null;
-
-      if (!folderForm.id) {
-          if (activeTab === 'warehouse') {
-              type = 'warehouse';
-              parentId = currentWarehouseFolderId;
-          } else if (activeTab === 'production') {
-              type = 'production';
-              parentId = currentProductionFolderId;
-          } else {
-              type = 'catalog';
-              parentId = currentCatalogFolderId;
-          }
-      } else {
-          const existing = store.toolFolders.find(f => f.id === folderForm.id);
-          if (existing) {
-              type = existing.type;
-              parentId = existing.parentId;
-          }
-      }
-      
-      const folder: ToolFolder = {
-          id: folderForm.id || `tf_${Date.now()}`,
-          name: folderForm.name,
-          parentId,
-          type,
-          colorTag: folderForm.color,
-      };
-      store.saveToolFolder(folder);
-      setIsFolderModalOpen(false);
-      refreshData();
-  };
-
-  const handleEditTool = (e: React.MouseEvent, tool: Tool) => {
-      e.stopPropagation();
-      setEditingId(tool.id);
-      setNewTool({
-          name: tool.name,
-          unit: tool.unit,
-          description: tool.description,
-          photo: tool.photo,
-          colorTag: tool.colorTag || '#3b82f6'
-      });
-      setIsToolModalOpen(true);
-  };
-
+  // --- 2. HANDLE ADD ITEM (Atomic Creation in 3 Collections) ---
   const handleCreateTool = async () => {
-      if (!newTool.name) return;
-      if (isUploading) return;
-      
-      setIsUploading(true);
-      let finalPhotoUrl = newTool.photo || '';
-
+      if (!newTool.name || isActionInProgress) return;
+      setIsActionInProgress(true);
       try {
-          if (toolPhotoFile) {
-              finalPhotoUrl = await uploadFileToCloudinary(toolPhotoFile);
-          }
+          let finalPhotoUrl = newTool.photo || '';
+          if (toolPhotoFile) finalPhotoUrl = await uploadFileToCloudinary(toolPhotoFile);
+          
+          const batch = writeBatch(db);
+          const newDocRef = doc(collection(db, 'toolCatalog'));
+          const id = newDocRef.id;
 
-          const tool: Tool = {
-              id: editingId || '',
+          const catalogData = {
               name: newTool.name,
               unit: newTool.unit || 'pcs',
-              photo: finalPhotoUrl,
+              photoUrl: finalPhotoUrl,
               description: newTool.description || '',
               folderId: currentCatalogFolderId,
-              colorTag: newTool.colorTag
+              colorTag: newTool.colorTag || '#3b82f6',
+              type: 'tool',
+              createdAt: serverTimestamp()
           };
+
+          // Створюємо записи в усіх 3-х колекціях з ОДНАКОВИМ ID
+          batch.set(doc(db, 'toolCatalog', id), catalogData);
+          batch.set(doc(db, 'toolWarehouse', id), { quantity: 0 });
+          batch.set(doc(db, 'toolProduction', id), { quantity: 0 });
           
-          await API.saveTool(tool);
+          await batch.commit();
           
           setIsToolModalOpen(false);
           setNewTool({ unit: 'pcs', colorTag: '#3b82f6' });
           setToolPhotoFile(null);
           setEditingId(null);
-          
-          if (isAddToWarehouseOpen) setSelectedToolId(tool.id); 
-          if (isAddToProductionOpen) setSelectedToolId(tool.id);
-          
+          fetchItems();
       } catch (e) {
-          alert('Upload failed');
+          alert('Помилка створення інструменту');
       } finally {
-          setIsUploading(false);
+          setIsActionInProgress(false);
       }
   };
 
-  const handleDeleteTool = (e: React.MouseEvent, id: string) => {
-      e.stopPropagation();
-      setDeleteConfirm({ isOpen: true, type: 'tool', id });
-  }
+  // --- 3. EXECUTE STOCK OP (Fail-Safe Restock / Move) ---
+  const executeStockOp = async () => {
+      const item = items.find(i => i.id === stockOp.itemId);
+      if (!item || !stockOp.qty || isActionInProgress) return;
 
-  const handleDeleteFolder = (e: React.MouseEvent, id: string) => {
-      e.stopPropagation();
-      setDeleteConfirm({ isOpen: true, type: 'folder', id });
-  }
-
-  const confirmDelete = async () => {
-      if (!deleteConfirm) return;
-      setIsDeleting(true);
+      setIsActionInProgress(true);
       try {
-          if (deleteConfirm.type === 'tool') {
-              await API.deleteTool(deleteConfirm.id);
+          const amount = Number(stockOp.qty);
+          const batch = writeBatch(db);
+
+          if (stockOp.type === 'add') {
+              // ПРИХІД НА СКЛАД: Використовуємо setDoc з merge, щоб створити док, якщо його немає
+              const whRef = doc(db, 'toolWarehouse', item.id);
+              batch.set(whRef, { quantity: increment(amount) }, { merge: true });
+
+              const txRef = doc(collection(db, 'toolTransactions'));
+              batch.set(txRef, {
+                  toolId: item.id,
+                  userId: currentUser.id,
+                  userName: `${currentUser.firstName} ${currentUser.lastName}`,
+                  type: 'import',
+                  amount: amount,
+                  target: 'Головний склад',
+                  date: new Date().toISOString()
+              });
           } else {
-              await API.deleteToolFolder(deleteConfirm.id);
-              store.deleteToolFolder(deleteConfirm.id);
-              refreshData();
+              // ПЕРЕМІЩЕННЯ В ЦЕХ
+              if (item.quantity < amount) { alert("Недостатньо залишку на складі!"); setIsActionInProgress(false); return; }
+              
+              batch.set(doc(db, 'toolWarehouse', item.id), { quantity: increment(-amount) }, { merge: true });
+              batch.set(doc(db, 'toolProduction', item.id), { quantity: increment(amount) }, { merge: true });
+              
+              const txRef = doc(collection(db, 'toolTransactions'));
+              batch.set(txRef, {
+                  toolId: item.id,
+                  userId: currentUser.id,
+                  userName: `${currentUser.firstName} ${currentUser.lastName}`,
+                  type: 'move_to_prod',
+                  amount: amount,
+                  target: stockOp.target || 'Виробництво (Цех)',
+                  date: new Date().toISOString()
+              });
           }
-          setDeleteConfirm(null);
-      } catch(e) {
-          console.error(e);
-          alert('Error deleting item');
+          
+          await batch.commit();
+          setIsStockModalOpen(false);
+          fetchItems();
+      } catch (e) {
+          alert("Помилка бази даних");
       } finally {
-          setIsDeleting(false);
+          setIsActionInProgress(false);
       }
+  };
+
+  // --- 4. EXECUTE USAGE OP (Fail-Safe Consumption) ---
+  const executeUsageOp = async () => {
+      const item = items.find(i => i.id === usageOp.itemId);
+      if (!item || !usageOp.qty || isActionInProgress) return;
+
+      const amount = Number(usageOp.qty);
+      const isFromWarehouse = activeTab === 'warehouse';
+      const currentStock = isFromWarehouse ? item.quantity : item.productionQuantity;
+
+      if (currentStock < amount) { alert("Недостатньо залишку!"); return; }
+
+      setIsActionInProgress(true);
+      try {
+          const batch = writeBatch(db);
+          const targetColl = isFromWarehouse ? 'toolWarehouse' : 'toolProduction';
+          
+          batch.set(doc(db, targetColl, item.id), { quantity: increment(-amount) }, { merge: true });
+          
+          const txRef = doc(collection(db, 'toolTransactions'));
+          batch.set(txRef, {
+              toolId: item.id,
+              userId: currentUser.id,
+              userName: `${currentUser.firstName} ${currentUser.lastName}`,
+              type: 'usage',
+              amount: amount,
+              target: usageOp.note || 'Використання',
+              date: new Date().toISOString()
+          });
+
+          await batch.commit();
+          setIsUsageModalOpen(false);
+          fetchItems();
+      } catch (e) {
+          alert("Помилка списання");
+      } finally {
+          setIsActionInProgress(false);
+      }
+  };
+
+  const handleEditItemSave = async () => {
+    if (!editingItem || isActionInProgress) return;
+    setIsActionInProgress(true);
+    try {
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'toolWarehouse', editingItem.id), { quantity: Number(editingItem.quantity) }, { merge: true });
+        batch.set(doc(db, 'toolProduction', editingItem.id), { quantity: Number(editingItem.productionQuantity) }, { merge: true });
+        // Оновлюємо поріг у каталозі
+        batch.update(doc(db, 'toolCatalog', editingItem.id), { criticalQuantity: Number(editingItem.criticalQuantity) });
+        
+        await batch.commit();
+        setIsItemEditModalOpen(false);
+        fetchItems();
+    } catch (e) {
+        alert("Помилка збереження");
+    } finally {
+        setIsActionInProgress(false);
+    }
+  };
+
+  const handleSaveFolder = async () => {
+      if (!folderForm.name) return;
+      let type: 'catalog' | 'warehouse' | 'production' = 'catalog';
+      let parentId: string | null = null;
+      if (!folderForm.id) {
+          if (activeTab === 'warehouse') { type = 'warehouse'; parentId = currentWarehouseFolderId; }
+          else if (activeTab === 'production') { type = 'production'; parentId = currentProductionFolderId; }
+          else { type = 'catalog'; parentId = currentCatalogFolderId; }
+      } else {
+          const existing = allFolders.find(f => f.id === folderForm.id);
+          if (existing) { type = existing.type; parentId = existing.parentId; }
+      }
+      const folder: ToolFolder = { id: folderForm.id || `tf_${Date.now()}`, name: folderForm.name, parentId, type, colorTag: folderForm.color };
+      await API.saveToolFolder(folder);
+      setIsFolderModalOpen(false);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setToolPhotoFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setNewTool({ ...newTool, photo: reader.result as string });
-      };
-      reader.readAsDataURL(file);
+        setToolPhotoFile(file);
+        const reader = new FileReader();
+        reader.onloadend = () => { if (typeof reader.result === 'string') setNewTool(prev => ({...prev, photo: reader.result as string})); };
+        reader.readAsDataURL(file);
     }
   };
 
-  const handleClipboard = (type: 'tool' | 'folder' | 'warehouseItem' | 'productionItem', id: string, op: 'cut' | 'copy', e: React.MouseEvent) => {
-      e.stopPropagation();
-      setClipboard({ type, id, op });
+  const filterItems = (list: any[]) => {
+      return list.filter(t => (t.name || '').toLowerCase().includes(searchTerm.toLowerCase()) && (!selectedColor || t.colorTag === selectedColor));
   };
 
-  const handlePaste = () => {
-      if (!clipboard) return;
-      
-      if (clipboard.type === 'tool') {
-          const t = tools.find(x => x.id === clipboard.id);
-          if (t) {
-              if (clipboard.op === 'cut') {
-                  const updated = { ...t, folderId: currentCatalogFolderId };
-                  API.saveTool(updated);
-                  setClipboard(null);
-              } else {
-                  const newT = { ...t, id: '', name: `${t.name} (Copy)`, folderId: currentCatalogFolderId };
-                  API.saveTool(newT);
-              }
-          }
-      } else if (clipboard.type === 'warehouseItem') {
-          const item = store.warehouse.find(w => w.id === clipboard.id);
-          if (item) {
-              if (clipboard.op === 'cut') {
-                  store.moveWarehouseItem(item.id, currentWarehouseFolderId);
-                  setClipboard(null);
-              } else {
-                  store.addWarehouseStock(item.toolId, currentWarehouseFolderId, item.quantity, currentUser, item.criticalQuantity);
-              }
-          }
-      } else if (clipboard.type === 'productionItem') {
-          const item = store.productionItems.find(p => p.id === clipboard.id);
-          if (item) {
-              if (clipboard.op === 'cut') {
-                  store.moveProductionItem(item.id, currentProductionFolderId);
-                  setClipboard(null);
-              }
-          }
-      } else if (clipboard.type === 'folder') {
-          const folder = store.toolFolders.find(f => f.id === clipboard.id);
-          if (folder) {
-              let targetParent = currentCatalogFolderId;
-              if (activeTab === 'warehouse') targetParent = currentWarehouseFolderId;
-              if (activeTab === 'production') targetParent = currentProductionFolderId;
-
-              if (clipboard.op === 'cut') {
-                  if (targetParent !== folder.id) { 
-                      store.moveToolFolder(folder.id, targetParent);
-                      setClipboard(null);
-                  }
-              } else {
-                  const newFolder: ToolFolder = {
-                      ...folder,
-                      id: `tf_${Date.now()}`,
-                      name: `${folder.name} (Copy)`,
-                      parentId: targetParent,
-                      type: activeTab
-                  };
-                  store.saveToolFolder(newFolder);
-              }
-          }
-      }
-      
-      refreshData();
+  const getBreadcrumbNameInner = (id: string | null, type: 'catalog' | 'warehouse' | 'production') => {
+      if (!id) return type === 'catalog' ? 'Root' : type === 'warehouse' ? 'Головний склад' : 'Виробництво (Цех)';
+      const folder = allFolders.find(f => f.id === id);
+      return folder ? folder.name : '...';
   };
 
-  const handleDragStart = (e: React.DragEvent, type: 'tool' | 'folder' | 'warehouseItem' | 'productionItem', id: string) => {
-      e.dataTransfer.setData('type', type);
-      e.dataTransfer.setData('id', id);
-      setDraggedItem({ type, id });
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-      e.preventDefault(); 
-      e.dataTransfer.dropEffect = "move";
-  };
-
-  const handleDrop = (e: React.DragEvent, targetFolderId: string | null) => {
-      e.preventDefault();
-      const type = e.dataTransfer.getData('type') as 'tool' | 'folder' | 'warehouseItem' | 'productionItem';
-      const id = e.dataTransfer.getData('id');
-
-      if (!type || !id) return;
-      if (type === 'folder' && id === targetFolderId) return; 
-
-      if (activeTab === 'catalog') {
-          if (type === 'tool') {
-              const t = tools.find(x => x.id === id);
-              if (t) { API.saveTool({ ...t, folderId: targetFolderId }); }
-          } else if (type === 'folder') {
-              store.moveToolFolder(id, targetFolderId);
-          }
-      } else if (activeTab === 'warehouse') {
-          if (type === 'warehouseItem') {
-              store.moveWarehouseItem(id, targetFolderId);
-          } else if (type === 'folder') {
-              store.moveToolFolder(id, targetFolderId);
-          }
-      } else if (activeTab === 'production') {
-          if (type === 'productionItem') {
-              store.moveProductionItem(id, targetFolderId);
-          } else if (type === 'folder') {
-              store.moveToolFolder(id, targetFolderId);
-          }
-      }
-      setDraggedItem(null);
-      refreshData();
-  };
-
-  const getStockStatus = (item: WarehouseItem) => {
-      if (item.quantity <= item.criticalQuantity) return 'red';
-      if (item.quantity <= item.criticalQuantity * 1.5) return 'yellow';
-      return 'green';
-  };
-  
-  const getProdStatus = (item: ProductionItem) => {
-      if (item.quantity <= item.criticalQuantity) return 'red';
-      return 'green';
-  };
-
-  const handleAddToWarehouse = () => {
-      if (!selectedToolId) return;
-      store.addWarehouseStock(
-          selectedToolId, 
-          currentWarehouseFolderId, 
-          Number(addStockQty), 
-          currentUser, 
-          Number(addStockCritical)
-      );
-      setIsAddToWarehouseOpen(false);
-      setSelectedToolId('');
-      setAddStockQty(1);
-      setAddStockCritical(5);
-      refreshData();
-  };
-
-  const handleAddToProduction = () => {
-      if (!selectedToolId) return;
-      store.addProductionStock(
-          selectedToolId, 
-          currentProductionFolderId, 
-          Number(addStockQty), 
-          currentUser, 
-          Number(addStockCritical)
-      );
-      setIsAddToProductionOpen(false);
-      setSelectedToolId('');
-      setAddStockQty(1);
-      setAddStockCritical(5);
-      refreshData();
-  };
-
-  const executeStockOp = () => {
-      if (stockOp.type === 'add') {
-          const wItem = warehouseItems.find(w => w.id === stockOp.itemId);
-          if (wItem) {
-              store.addWarehouseStock(wItem.toolId, wItem.folderId, stockOp.qty, currentUser);
-          }
-      } else {
-          try {
-             store.moveStockToProduction(stockOp.itemId, stockOp.qty, currentUser, stockOp.target);
-          } catch(e) {
-             alert(e instanceof Error ? e.message : String(e));
-          }
-      }
-      setIsStockModalOpen(false);
-      refreshData();
-  };
-
-  const executeUsageOp = () => {
-      try {
-          store.consumeProductionTool(usageOp.itemId, usageOp.qty, currentUser, usageOp.note);
-          setIsUsageModalOpen(false);
-          refreshData();
-      } catch(e) {
-          alert(e instanceof Error ? e.message : String(e));
-      }
-  };
-
-  const handleExport = () => {
-      let csv = "Date;User;Type;Tool;Amount;Target;Balance\n";
-      transactions.forEach(tr => {
-         const t = store.getTool(tr.toolId);
-         csv += `${new Date(tr.date).toLocaleString()};${tr.userName};${tr.type};${t?.name};${tr.amount};${tr.target || ''};${tr.balanceSnapshot}\n`;
-      });
-      const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csv);
-      const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
-      link.setAttribute("download", "tools_report.csv");
-      document.body.appendChild(link);
-      link.click();
-  };
-
-  const filterTools = (toolsList: Tool[]) => {
-      return toolsList.filter(t => {
-          const matchesSearch = t.name.toLowerCase().includes(searchTerm.toLowerCase());
-          const matchesColor = selectedColor ? t.colorTag === selectedColor : true;
-          return matchesSearch && matchesColor;
-      });
-  };
-
-  const filterFolders = (foldersList: ToolFolder[]) => {
-      return foldersList.filter(f => {
-          const matchesSearch = f.name.toLowerCase().includes(searchTerm.toLowerCase());
-          const matchesColor = selectedColor ? f.colorTag === selectedColor : true;
-          return matchesSearch && matchesColor;
-      });
-  };
-
-  const filterItems = (items: (WarehouseItem | ProductionItem)[]) => {
-      return items.filter(item => {
-          const t = tools.find(tool => tool.id === item.toolId);
-          if (!t) return false;
-          const matchesSearch = t.name.toLowerCase().includes(searchTerm.toLowerCase());
-          const matchesColor = selectedColor ? t.colorTag === selectedColor : true;
-          return matchesSearch && matchesColor;
-      });
-  };
-
-  const SearchBar = () => (
-    <div className="bg-white p-3 rounded-xl border mb-4 flex flex-col md:flex-row md:items-center gap-4">
-        <div className="flex items-center flex-1 bg-gray-50 rounded-lg px-3 border border-gray-100">
-            <Search size={18} className="text-gray-400 mr-3"/>
-            <input 
-                placeholder="Пошук інструменту..." 
-                className="flex-1 bg-transparent py-2 outline-none text-sm" 
-                value={searchTerm} 
-                onChange={e => setSearchTerm(e.target.value)}
-            />
-        </div>
-        <div className="flex items-center gap-2 pl-2 border-l border-gray-100">
-            <Filter size={16} className="text-gray-400 mr-1"/>
-            <div className="flex gap-1.5">
-                {COLORS.map(color => (
-                    <button
-                        key={color}
-                        onClick={() => setSelectedColor(selectedColor === color ? null : color)}
-                        className={`w-5 h-5 rounded-full border transition-transform hover:scale-110 ${selectedColor === color ? 'ring-2 ring-offset-1 ring-slate-900 scale-110' : 'border-transparent'}`}
-                        style={{ backgroundColor: color }}
-                        title="Фільтр за кольором"
-                    />
-                ))}
-            </div>
-            {selectedColor && (
-                <button onClick={() => setSelectedColor(null)} className="ml-2 text-xs text-gray-400 hover:text-red-500">
-                    <X size={14}/>
-                </button>
-            )}
-        </div>
-    </div>
-  );
+  if (isLoading) return <div className="h-screen flex items-center justify-center"><Loader className="animate-spin text-blue-600" size={32}/></div>;
 
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col bg-slate-50">
-      {/* Header and Tabs */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 shrink-0">
-        <div>
-           <h1 className="text-2xl font-bold text-gray-900">Витратні інструменти</h1>
-           <p className="text-gray-500 text-sm">Управління складом та видачею</p>
-        </div>
+        <div><h1 className="text-2xl font-bold text-gray-900">Витратні інструменти</h1><p className="text-gray-500 text-sm">Управління залишками та видачею (Fail-Safe)</p></div>
         <div className="flex bg-white p-1 rounded-xl shadow-sm border border-gray-200 mt-4 md:mt-0 w-full md:w-auto overflow-x-auto whitespace-nowrap">
            {currentUser.role === 'admin' && (
-               <>
-                <button onClick={() => setActiveTab('catalog')} className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center transition-all ${activeTab === 'catalog' ? 'bg-slate-900 text-white' : 'text-gray-500 hover:text-gray-800'}`}>
-                    <Wrench size={16} className="mr-2"/> Каталог
-                </button>
-                <button onClick={() => setActiveTab('warehouse')} className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center transition-all ${activeTab === 'warehouse' ? 'bg-slate-900 text-white' : 'text-gray-500 hover:text-gray-800'}`}>
-                    <Package size={16} className="mr-2"/> Склад
-                </button>
-               </>
+               <><button onClick={() => setActiveTab('catalog')} className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center transition-all ${activeTab === 'catalog' ? 'bg-slate-900 text-white' : 'text-gray-500 hover:text-gray-800'}`}><Wrench size={16} className="mr-2"/> Каталог</button>
+                <button onClick={() => setActiveTab('warehouse')} className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center transition-all ${activeTab === 'warehouse' ? 'bg-slate-900 text-white' : 'text-gray-500 hover:text-gray-800'}`}><Package size={16} className="mr-2"/> Склад</button></>
            )}
-           <button onClick={() => setActiveTab('production')} className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center transition-all ${activeTab === 'production' ? 'bg-slate-900 text-white' : 'text-gray-500 hover:text-gray-800'}`}>
-               <Clipboard size={16} className="mr-2"/> Виробництво
-           </button>
-           {currentUser.role === 'admin' && (
-                <button onClick={() => setActiveTab('analytics')} className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center transition-all ${activeTab === 'analytics' ? 'bg-slate-900 text-white' : 'text-gray-500 hover:text-gray-800'}`}>
-                    <TrendingUp size={16} className="mr-2"/> Аналітика
-                </button>
-           )}
+           <button onClick={() => setActiveTab('production')} className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center transition-all ${activeTab === 'production' ? 'bg-slate-900 text-white' : 'text-gray-500 hover:text-gray-800'}`}><Clipboard size={16} className="mr-2"/> Виробництво</button>
+           {currentUser.role === 'admin' && (<button onClick={() => setActiveTab('analytics')} className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center transition-all ${activeTab === 'analytics' ? 'bg-slate-900 text-white' : 'text-gray-500 hover:text-gray-800'}`}><TrendingUp size={16} className="mr-2"/> Аналітика</button>)}
         </div>
       </div>
 
       <div className="flex-1 overflow-hidden bg-white rounded-xl border border-gray-200 shadow-sm relative">
-         {/* CATALOG TAB */}
+         {/* CATALOG VIEW */}
          {activeTab === 'catalog' && (
              <div className="h-full flex flex-col">
-                 <div 
-                    className={`p-4 border-b border-gray-100 flex justify-between items-center ${draggedItem ? 'bg-blue-50 border-blue-200' : 'bg-gray-50'}`}
-                    onDragOver={handleDragOver}
-                    onDrop={(e) => handleDrop(e, null)}
-                 >
-                     <div className="flex items-center text-sm font-medium">
-                        <button onClick={() => setCurrentCatalogFolderId(null)} className="hover:text-blue-600 flex items-center"><Folder size={16} className="mr-1"/> Root</button>
-                        {currentCatalogFolderId && <><ArrowRight size={14} className="mx-2 text-gray-400"/> {getBreadcrumbName(currentCatalogFolderId, 'catalog')}</>}
-                     </div>
+                 <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                     <div className="flex items-center text-sm font-medium"><button onClick={() => setCurrentCatalogFolderId(null)} className="hover:text-blue-600 flex items-center"><Folder size={16} className="mr-1"/> Root</button>{currentCatalogFolderId && <><ArrowRight size={14} className="mx-2 text-gray-400"/> {getBreadcrumbNameInner(currentCatalogFolderId, 'catalog')}</>}</div>
                      <div className="flex gap-2">
-                        {clipboard && (
-                            <button onClick={handlePaste} className="bg-orange-100 text-orange-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center border border-orange-200 animate-pulse">
-                                <Clipboard size={16} className="mr-1"/> Paste ({clipboard.op})
-                            </button>
-                        )}
-                        <button onClick={handleExportInventory} className="bg-white border hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center">
-                            <Download size={16} className="mr-1"/> Експорт
-                        </button>
-                        <button onClick={openNewFolderModal} className="bg-white border hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center">
-                            <FolderPlus size={16} className="mr-1"/> Папка
-                        </button>
-                        <button onClick={() => { setEditingId(null); setNewTool({ unit: 'pcs', colorTag: '#3b82f6' }); setIsToolModalOpen(true); }} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center hover:bg-blue-700">
-                            <Plus size={16} className="mr-1"/> Інструмент
-                        </button>
+                        <button onClick={openNewFolderModal} className="bg-white border px-3 py-1.5 rounded-lg text-xs font-bold flex items-center shadow-sm hover:bg-gray-50 transition-all"><FolderPlus size={16} className="mr-1"/> Папка</button>
+                        <button onClick={() => { setEditingId(null); setNewTool({ unit: 'pcs', colorTag: '#3b82f6' }); setIsToolModalOpen(true); }} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center hover:bg-blue-700 shadow-lg"><Plus size={16} className="mr-1"/> Інструмент</button>
                      </div>
                  </div>
-                 
                  <div className="p-4 bg-gray-50">
-                    <SearchBar />
+                    <div className="bg-white p-3 rounded-xl border flex items-center">
+                        <Search size={18} className="text-gray-400 mr-3"/><input placeholder="Пошук..." className="flex-1 bg-transparent py-2 outline-none text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                    </div>
                  </div>
-
-                 <div className="p-6 overflow-y-auto grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 align-start content-start">
-                     {filterFolders(catalogFolders).map(f => (
-                         <div key={f.id} 
-                              onClick={() => setCurrentCatalogFolderId(f.id)}
-                              draggable
-                              onDragStart={(e) => handleDragStart(e, 'folder', f.id)}
-                              onDragOver={handleDragOver}
-                              onDrop={(e) => handleDrop(e, f.id)}
-                              className="group p-4 bg-gray-50 rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-md cursor-pointer transition-all flex flex-col items-center relative"
-                         >
-                             <div className="relative mb-2">
-                                <Folder size={48} className="text-blue-200 group-hover:text-blue-400 transition-colors" style={{ color: f.colorTag ? `${f.colorTag}40` : undefined }} />
-                                {f.colorTag && <Folder size={48} className="absolute inset-0 text-blue-200 group-hover:text-blue-500 transition-colors opacity-50" style={{ color: f.colorTag }} />}
-                             </div>
-                             <span className="text-sm font-bold text-gray-700 text-center">{f.name}</span>
-                             <div className="absolute top-2 right-2 flex gap-1">
-                                <button onClick={(e) => handleEditFolder(e, f)} className="p-1 bg-white shadow rounded hover:text-blue-600 border border-gray-100"><Pencil size={12}/></button>
-                                <button onClick={(e) => handleClipboard('folder', f.id, 'copy', e)} className="p-1 bg-white shadow rounded hover:text-blue-600 border border-gray-100"><ClipboardCopy size={12}/></button>
-                                <button onClick={(e) => handleClipboard('folder', f.id, 'cut', e)} className="p-1 bg-white shadow rounded hover:text-orange-600 border border-gray-100"><Scissors size={12}/></button>
-                                <button onClick={(e) => handleDeleteFolder(e, f.id)} className="p-1 bg-white shadow rounded hover:text-red-600 border border-gray-100"><Trash2 size={12}/></button>
-                             </div>
+                 <div className="p-6 overflow-y-auto grid grid-cols-2 md:grid-cols-6 gap-4">
+                     {allFolders.filter(f => f.type === 'catalog' && f.parentId === currentCatalogFolderId).map(f => (
+                         <div key={f.id} onClick={() => setCurrentCatalogFolderId(f.id)} className="group p-4 bg-gray-50 rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer flex flex-col items-center relative">
+                             <Folder size={48} className="text-blue-200" style={{ color: f.colorTag }} />
+                             <span className="text-sm font-bold text-gray-700">{f.name}</span>
+                             <button onClick={e => { e.stopPropagation(); setFolderForm({ id: f.id, name: f.name, color: f.colorTag || '#3b82f6' }); setIsFolderModalOpen(true); }} className="absolute top-2 right-2 p-1 bg-white shadow rounded hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"><Pencil size={12}/></button>
                          </div>
                      ))}
-                     
-                     {filterTools(tools.filter(t => t.folderId === currentCatalogFolderId)).map(t => (
-                         <div key={t.id} 
-                              draggable
-                              onDragStart={(e) => handleDragStart(e, 'tool', t.id)}
-                              className="group relative p-4 bg-white rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all flex flex-col items-center"
-                         >
-                             {t.colorTag && (
-                                <div className="absolute top-2 left-2 w-3 h-3 rounded-full" style={{ backgroundColor: t.colorTag }} />
-                             )}
-                             <div className="w-16 h-16 bg-gray-100 rounded-lg mb-2 overflow-hidden border border-gray-100">
-                                 {t.photo && <img src={t.photo} className="w-full h-full object-cover"/>}
+                     {filterItems(items.filter(i => i.folderId === currentCatalogFolderId)).map(t => (
+                         <div key={t.id} className="group relative p-4 bg-white rounded-xl border border-gray-200 hover:border-blue-400 transition-all flex flex-col items-center">
+                             <div className="w-16 h-16 bg-gray-100 rounded-lg mb-2 overflow-hidden border">
+                                {t.photo && <img src={t.photo} className="w-full h-full object-cover"/>}
                              </div>
                              <span className="text-xs font-bold text-gray-800 text-center line-clamp-2">{t.name}</span>
-                             <span className="text-[10px] text-gray-400 mt-1 uppercase font-bold">{t.unit}</span>
-                             
                              <div className="absolute top-2 right-2 flex gap-1">
-                                <button onClick={(e) => handleEditTool(e, t)} className="p-1 bg-white shadow rounded hover:text-blue-600 border border-gray-100"><Pencil size={12}/></button>
-                                <button onClick={(e) => handleClipboard('tool', t.id, 'copy', e)} className="p-1 bg-white shadow rounded hover:text-blue-600 border border-gray-100"><ClipboardCopy size={12}/></button>
-                                <button onClick={(e) => handleClipboard('tool', t.id, 'cut', e)} className="p-1 bg-white shadow rounded hover:text-orange-600 border border-gray-100"><Scissors size={12}/></button>
-                                <button onClick={(e) => handleDeleteTool(e, t.id)} className="p-1 bg-white shadow rounded hover:text-red-600 border border-gray-100"><Trash2 size={12}/></button>
+                                <button onClick={e => { e.stopPropagation(); setEditingId(t.id); setNewTool(t); setIsToolModalOpen(true); }} className="p-1 bg-white shadow rounded hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"><Pencil size={12}/></button>
+                                <button onClick={e => { e.stopPropagation(); setDeleteConfirm({isOpen: true, type: 'tool', id: t.id}); }} className="p-1 bg-white shadow rounded hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={12}/></button>
                              </div>
                          </div>
                      ))}
@@ -657,591 +393,229 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
              </div>
          )}
 
-         {/* WAREHOUSE TAB */}
+         {/* WAREHOUSE VIEW */}
          {activeTab === 'warehouse' && (
              <div className="h-full flex flex-col">
-                 <div 
-                    className={`p-4 border-b border-gray-100 flex justify-between items-center ${draggedItem ? 'bg-blue-50 border-blue-200' : 'bg-gray-50'}`}
-                    onDragOver={handleDragOver}
-                    onDrop={(e) => handleDrop(e, null)}
-                 >
-                     <div className="flex items-center text-sm font-medium">
-                        <button onClick={() => setCurrentWarehouseFolderId(null)} className="hover:text-blue-600 flex items-center"><Folder size={16} className="mr-1"/> Головний склад</button>
-                        {currentWarehouseFolderId && <><ArrowRight size={14} className="mx-2 text-gray-400"/> {getBreadcrumbName(currentWarehouseFolderId, 'warehouse')}</>}
-                     </div>
-                     <div className="flex gap-2">
-                        {clipboard && (
-                            <button onClick={handlePaste} className="bg-orange-100 text-orange-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center border border-orange-200 animate-pulse">
-                                <Clipboard size={16} className="mr-1"/> Paste ({clipboard.op})
-                            </button>
-                        )}
-                        <button onClick={handleExportInventory} className="bg-white border hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center">
-                            <Download size={16} className="mr-1"/> Експорт
-                        </button>
-                        <button onClick={openNewFolderModal} className="bg-white border hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center">
-                            <FolderPlus size={16} className="mr-1"/> Папка
-                        </button>
-                        <button onClick={() => setIsAddToWarehouseOpen(true)} className="bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center hover:bg-slate-800">
-                            <Plus size={16} className="mr-1"/> Додати позицію
-                        </button>
-                     </div>
+                 <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                    <span className="font-bold text-gray-700 flex items-center"><Package size={18} className="mr-2"/> Головний склад</span>
+                    <button onClick={() => setActiveTab('catalog')} className="bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center hover:bg-slate-800 shadow-md"><Plus size={16} className="mr-1"/> Нова позиція (з каталогу)</button>
                  </div>
-
                  <div className="p-4 bg-gray-50">
-                    <SearchBar />
+                    <div className="bg-white p-3 rounded-xl border flex items-center">
+                        <Search size={18} className="text-gray-400 mr-3"/><input placeholder="Пошук на складі..." className="flex-1 bg-transparent py-2 outline-none text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                    </div>
                  </div>
-
-                 <div className="p-6 overflow-y-auto">
-                     {warehouseFolders.length > 0 && (
-                         <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-8">
-                             {filterFolders(warehouseFolders).map(f => (
-                                 <div 
-                                    key={f.id} 
-                                    onClick={() => setCurrentWarehouseFolderId(f.id)}
-                                    draggable
-                                    onDragStart={(e) => handleDragStart(e, 'folder', f.id)}
-                                    onDragOver={handleDragOver}
-                                    onDrop={(e) => handleDrop(e, f.id)}
-                                    className="p-4 bg-gray-50 rounded-xl border border-gray-200 hover:border-blue-400 cursor-pointer flex flex-col items-center group relative hover:shadow-md transition-all"
-                                >
-                                     <div className="relative mb-2">
-                                        <Folder size={32} className="text-gray-400 group-hover:text-blue-400 transition-colors" style={{ color: f.colorTag ? `${f.colorTag}40` : undefined }} />
-                                        {f.colorTag && <Folder size={32} className="absolute inset-0 text-gray-400 group-hover:text-blue-500 transition-colors opacity-50" style={{ color: f.colorTag }} />}
-                                     </div>
-                                     <span className="text-xs font-bold">{f.name}</span>
-                                     <div className="absolute top-2 right-2 flex gap-1">
-                                        <button onClick={(e) => handleEditFolder(e, f)} className="p-1 bg-white rounded shadow hover:text-blue-600 border border-gray-100"><Pencil size={12}/></button>
-                                        <button onClick={(e) => handleClipboard('folder', f.id, 'copy', e)} className="p-1 bg-white rounded shadow hover:text-blue-600 border border-gray-100"><ClipboardCopy size={12}/></button>
-                                        <button onClick={(e) => handleClipboard('folder', f.id, 'cut', e)} className="p-1 bg-white rounded shadow hover:text-orange-600 border border-gray-100"><Scissors size={12}/></button>
-                                        <button onClick={(e) => handleDeleteFolder(e, f.id)} className="p-1 bg-white rounded shadow hover:text-red-600 border border-gray-100"><Trash2 size={12}/></button>
-                                     </div>
-                                 </div>
-                             ))}
-                         </div>
-                     )}
-
-                     <div className="space-y-2">
-                        {warehouseItems.length === 0 && warehouseFolders.length === 0 && (
-                            <div className="text-center py-10 text-gray-400">
-                                <Package size={48} className="mx-auto mb-2 opacity-20"/>
-                                <p className="text-sm">Ця папка порожня</p>
-                            </div>
-                        )}
-                        {filterItems(warehouseItems).map((item) => {
-                            const wItem = item as WarehouseItem;
-                            const tool = tools.find(t => t.id === wItem.toolId);
-                            const status = getStockStatus(wItem);
-                            return (
-                                <div 
-                                    key={wItem.id} 
-                                    draggable
-                                    onDragStart={(e) => handleDragStart(e, 'warehouseItem', wItem.id)}
-                                    className={`flex items-center justify-between p-3 bg-white border rounded-lg hover:shadow-sm transition-all group ${status === 'red' ? 'border-red-300 bg-red-50/50' : status === 'yellow' ? 'border-yellow-300 bg-yellow-50/50' : 'border-gray-200'}`}
-                                >
-                                    <div className="flex items-center gap-4">
-                                        {tool?.colorTag && (
-                                            <div className="w-2 h-10 rounded-full" style={{ backgroundColor: tool.colorTag }} />
-                                        )}
-                                        <div className="w-10 h-10 bg-gray-100 rounded border overflow-hidden">
-                                            {tool?.photo && <img src={tool.photo} className="w-full h-full object-cover"/>}
-                                        </div>
-                                        <div>
-                                            <div className="font-bold text-sm text-gray-900">{tool?.name}</div>
-                                            <div className="text-xs text-gray-500">Мін: {wItem.criticalQuantity} {tool?.unit}</div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="flex items-center gap-6">
-                                        <div className="text-right">
-                                            <div className={`text-lg font-bold ${status === 'red' ? 'text-red-600' : status === 'yellow' ? 'text-yellow-600' : 'text-gray-800'}`}>
-                                                {wItem.quantity} <span className="text-xs font-normal text-gray-500">{tool?.unit}</span>
-                                            </div>
-                                            {status !== 'green' && <div className="text-[10px] font-bold text-red-500 uppercase flex items-center justify-end"><AlertTriangle size={10} className="mr-1"/> Мало</div>}
-                                        </div>
-                                        <div className="flex gap-1">
-                                            <button onClick={(e) => handleClipboard('warehouseItem', wItem.id, 'copy', e)} className="p-1.5 rounded bg-gray-100 hover:text-blue-600" title="Копіювати"><ClipboardCopy size={14}/></button>
-                                            <button onClick={(e) => handleClipboard('warehouseItem', wItem.id, 'cut', e)} className="p-1.5 rounded bg-gray-100 hover:text-orange-600" title="Вирізати"><Scissors size={14}/></button>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <button onClick={() => { setStockOp({ type: 'add', itemId: wItem.id, qty: 0, target: '' }); setIsStockModalOpen(true); }} className="w-8 h-8 rounded-lg bg-green-100 text-green-700 flex items-center justify-center hover:bg-green-200">
-                                                <Plus size={16}/>
-                                            </button>
-                                            <button onClick={() => { setStockOp({ type: 'move', itemId: wItem.id, qty: 0, target: 'Production' }); setIsStockModalOpen(true); }} className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center hover:bg-blue-200">
-                                                <ArrowRight size={16}/>
-                                            </button>
-                                        </div>
+                 <div className="p-6 overflow-y-auto space-y-2">
+                    {filterItems(items).map(item => {
+                        const isLow = (item.quantity || 0) <= (item.criticalQuantity || 5);
+                        return (
+                            <div key={item.id} className={`flex items-center justify-between p-3 bg-white border rounded-lg hover:shadow-sm transition-all group ${isLow ? 'border-red-300 bg-red-50/50' : 'border-gray-200'}`}>
+                                <div className="flex items-center gap-4">
+                                    <div className="w-10 h-10 bg-gray-100 rounded border overflow-hidden">{item.photo && <img src={item.photo} className="w-full h-full object-cover"/>}</div>
+                                    <div><div className="font-bold text-sm text-gray-900">{item.name}</div><div className="text-xs text-gray-500">Мін: {item.criticalQuantity || 5} {item.unit}</div></div>
+                                </div>
+                                <div className="flex items-center gap-6">
+                                    <div className="text-right font-bold text-lg text-gray-800">{item.quantity || 0}</div>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => { setStockOp({ type: 'add', itemId: item.id, qty: 1, target: '' }); setIsStockModalOpen(true); }} className="w-8 h-8 rounded-lg bg-green-100 text-green-700 flex items-center justify-center hover:bg-green-200" title="Прихід"><Plus size={16}/></button>
+                                        <button onClick={() => { setStockOp({ type: 'move', itemId: item.id, qty: 1, target: 'Виробництво' }); setIsStockModalOpen(true); }} className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center hover:bg-blue-200" title="В цех"><ArrowRight size={16}/></button>
+                                        <button onClick={() => { setEditingItem(item); setIsItemEditModalOpen(true); }} className="p-2 text-gray-400 hover:text-blue-600 rounded transition-all"><Pencil size={14}/></button>
                                     </div>
                                 </div>
-                            )
-                        })}
-                     </div>
+                            </div>
+                        )
+                    })}
                  </div>
              </div>
          )}
 
-         {/* PRODUCTION TAB */}
+         {/* PRODUCTION VIEW */}
          {activeTab === 'production' && (
              <div className="h-full flex flex-col">
-                 <div 
-                    className={`p-4 border-b border-gray-100 flex justify-between items-center ${draggedItem ? 'bg-blue-50 border-blue-200' : 'bg-gray-50'}`}
-                    onDragOver={handleDragOver}
-                    onDrop={(e) => handleDrop(e, null)}
-                 >
-                     <div className="flex items-center text-sm font-medium">
-                        <button onClick={() => setCurrentProductionFolderId(null)} className="hover:text-blue-600 flex items-center"><Folder size={16} className="mr-1"/> Виробництво</button>
-                        {currentProductionFolderId && <><ArrowRight size={14} className="mx-2 text-gray-400"/> {getBreadcrumbName(currentProductionFolderId, 'production')}</>}
-                     </div>
-                     <div className="flex gap-2">
-                        {clipboard && (
-                            <button onClick={handlePaste} className="bg-orange-100 text-orange-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center border border-orange-200 animate-pulse">
-                                <Clipboard size={16} className="mr-1"/> Paste ({clipboard.op})
-                            </button>
-                        )}
-                        <button onClick={handleExportInventory} className="bg-white border hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center">
-                            <Download size={16} className="mr-1"/> Експорт
-                        </button>
-                        <button onClick={openNewFolderModal} className="bg-white border hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center">
-                            <FolderPlus size={16} className="mr-1"/> Папка
-                        </button>
-                        <button onClick={() => setIsAddToProductionOpen(true)} className="bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center hover:bg-slate-800">
-                            <Plus size={16} className="mr-1"/> Додати інструмент
-                        </button>
-                     </div>
+                 <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                     <span className="font-bold text-gray-700 flex items-center"><Clipboard size={18} className="mr-2"/> Наявність у виробництві (Цех)</span>
                  </div>
-
                  <div className="p-4 bg-gray-50">
-                    <SearchBar />
+                    <div className="bg-white p-3 rounded-xl border flex items-center">
+                        <Search size={18} className="text-gray-400 mr-3"/><input placeholder="Пошук у цеху..." className="flex-1 bg-transparent py-2 outline-none text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                    </div>
                  </div>
-
-                 <div className="p-6 overflow-y-auto">
-                     {productionFolders.length > 0 && (
-                         <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-8">
-                             {filterFolders(productionFolders).map(f => (
-                                 <div 
-                                    key={f.id} 
-                                    onClick={() => setCurrentProductionFolderId(f.id)}
-                                    draggable
-                                    onDragStart={(e) => handleDragStart(e, 'folder', f.id)}
-                                    onDragOver={handleDragOver}
-                                    onDrop={(e) => handleDrop(e, f.id)}
-                                    className="p-4 bg-gray-50 rounded-xl border border-gray-200 hover:border-blue-400 cursor-pointer flex flex-col items-center group relative hover:shadow-md transition-all"
-                                >
-                                     <div className="relative mb-2">
-                                        <Folder size={32} className="text-gray-400 group-hover:text-blue-400 transition-colors" style={{ color: f.colorTag ? `${f.colorTag}40` : undefined }} />
-                                        {f.colorTag && <Folder size={32} className="absolute inset-0 text-gray-400 group-hover:text-blue-500 transition-colors opacity-50" style={{ color: f.colorTag }} />}
-                                     </div>
-                                     <span className="text-xs font-bold">{f.name}</span>
-                                     <div className="absolute top-2 right-2 flex gap-1">
-                                        <button onClick={(e) => handleEditFolder(e, f)} className="p-1 bg-white rounded shadow hover:text-blue-600 border border-gray-100"><Pencil size={12}/></button>
-                                        <button onClick={(e) => handleClipboard('folder', f.id, 'copy', e)} className="p-1 bg-white rounded shadow hover:text-blue-600 border border-gray-100"><ClipboardCopy size={12}/></button>
-                                        <button onClick={(e) => handleClipboard('folder', f.id, 'cut', e)} className="p-1 bg-white rounded shadow hover:text-orange-600 border border-gray-100"><Scissors size={12}/></button>
-                                        <button onClick={(e) => handleDeleteFolder(e, f.id)} className="p-1 bg-white rounded shadow hover:text-red-600 border border-gray-100"><Trash2 size={12}/></button>
-                                     </div>
+                 <div className="p-6 overflow-y-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                     {filterItems(items).filter(i => (i.productionQuantity || 0) > 0 || (i.quantity || 0) > 0).map(item => {
+                         return (
+                             <div key={item.id} className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-md transition-all relative">
+                                 <div className="flex justify-between items-start mb-4">
+                                     <div className="w-12 h-12 bg-gray-100 rounded-lg overflow-hidden border">{item.photo && <img src={item.photo} className="w-full h-full object-cover"/>}</div>
+                                     <div className="text-xl font-bold text-gray-900">{item.productionQuantity || 0} <span className="text-sm text-gray-400 font-normal">{item.unit}</span></div>
                                  </div>
-                             ))}
-                         </div>
-                     )}
-
-                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                         {productionItems.length === 0 && productionFolders.length === 0 && (
-                            <div className="col-span-full text-center py-10 text-gray-400">
-                                <Package size={48} className="mx-auto mb-2 opacity-20"/>
-                                <p className="text-sm">Тут порожньо</p>
-                            </div>
-                         )}
-                         {filterItems(productionItems).map(item => {
-                             const pItem = item as ProductionItem;
-                             const tool = tools.find(t => t.id === pItem.toolId);
-                             const status = getProdStatus(pItem);
-                             return (
-                                 <div 
-                                    key={pItem.id} 
-                                    draggable
-                                    onDragStart={(e) => handleDragStart(e, 'productionItem', pItem.id)}
-                                    className={`bg-white rounded-xl border p-5 shadow-sm hover:shadow-md transition-all group relative ${status === 'red' ? 'border-red-300 ring-1 ring-red-100' : 'border-gray-200'}`}
-                                 >
-                                     {tool?.colorTag && (
-                                        <div className="absolute top-3 right-3 w-3 h-3 rounded-full" style={{ backgroundColor: tool.colorTag }} />
-                                     )}
-                                     <div className="flex justify-between items-start mb-4">
-                                         <div className="w-12 h-12 bg-gray-100 rounded-lg overflow-hidden border">
-                                             {tool?.photo && <img src={tool.photo} className="w-full h-full object-cover"/>}
-                                         </div>
-                                         <div className={`text-xl font-bold ${status === 'red' ? 'text-red-600' : 'text-gray-900'}`}>
-                                             {pItem.quantity} <span className="text-sm text-gray-400 font-normal">{tool?.unit}</span>
-                                         </div>
-                                     </div>
-                                     <h3 className="font-bold text-gray-900 mb-1 line-clamp-1">{tool?.name}</h3>
-                                     <p className="text-xs text-gray-500 mb-4">{tool?.description || 'Без опису'}</p>
-                                     
-                                     <button 
-                                        onClick={() => { setUsageOp({ itemId: pItem.id, qty: 1, note: '' }); setIsUsageModalOpen(true); }}
-                                        className="w-full py-2 bg-slate-900 text-white rounded-lg font-bold text-sm hover:bg-slate-800 active:scale-95 transition-all"
-                                     >
-                                         Взяти інструмент
-                                     </button>
-
-                                     <div className="absolute top-2 right-2 flex gap-1">
-                                        <button onClick={(e) => handleClipboard('productionItem', pItem.id, 'cut', e)} className="p-1 bg-white shadow rounded hover:text-orange-600 border border-gray-100"><Scissors size={12}/></button>
-                                     </div>
+                                 <h3 className="font-bold text-gray-900 mb-4 line-clamp-1">{item.name}</h3>
+                                 <div className="flex gap-2">
+                                    <button onClick={() => { setUsageOp({ itemId: item.id, qty: 1, note: '' }); setIsUsageModalOpen(true); }} className="flex-1 py-2 bg-slate-900 text-white rounded-lg font-bold text-sm hover:bg-slate-800 shadow-md">Взяти</button>
+                                    <button onClick={() => { setEditingItem(item); setIsItemEditModalOpen(true); }} className="p-2 bg-gray-50 border rounded-lg text-gray-400 hover:text-blue-600 transition-all"><Pencil size={16}/></button>
                                  </div>
-                             );
-                         })}
-                     </div>
+                             </div>
+                         );
+                     })}
                  </div>
              </div>
          )}
 
-         {/* ANALYTICS TAB */}
+         {/* ANALYTICS VIEW */}
          {activeTab === 'analytics' && (
              <div className="h-full flex flex-col">
-                 <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-end">
-                     <button onClick={handleExport} className="flex items-center text-sm font-bold text-green-700 bg-green-100 px-4 py-2 rounded-lg hover:bg-green-200">
-                         <Download size={16} className="mr-2"/> Експорт Excel
-                     </button>
-                 </div>
-                 <div className="flex-1 overflow-x-auto p-0">
-                     <div className="min-w-full inline-block align-middle">
-                         <div className="overflow-hidden">
-                             <table className="min-w-[800px] w-full text-sm text-left">
-                                 <thead className="bg-gray-50 text-gray-500 font-medium border-b sticky top-0">
-                                     <tr>
-                                         <th className="p-4">Дата</th>
-                                         <th className="p-4">Працівник</th>
-                                         <th className="p-4">Тип операції</th>
-                                         <th className="p-4">Інструмент</th>
-                                         <th className="p-4 text-right">Кількість</th>
-                                         <th className="p-4">Ціль / Нотатка</th>
-                                     </tr>
-                                 </thead>
-                                 <tbody className="divide-y divide-gray-100">
-                                     {transactions.map(tr => {
-                                         const tool = tools.find(t => t.id === tr.toolId);
-                                         return (
-                                             <tr key={tr.id} className="hover:bg-gray-50">
-                                                 <td className="p-4 text-gray-500">{new Date(tr.date).toLocaleString('uk-UA')}</td>
-                                                 <td className="p-4 font-bold text-gray-700">{tr.userName}</td>
-                                                 <td className="p-4">
-                                                     <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${
-                                                         tr.type === 'import' ? 'bg-green-100 text-green-700' :
-                                                         tr.type === 'usage' ? 'bg-orange-100 text-orange-700' :
-                                                         'bg-blue-100 text-blue-700'
-                                                     }`}>
-                                                         {tr.type === 'import' ? 'Прихід' : tr.type === 'usage' ? 'Використання' : 'Переміщення'}
-                                                     </span>
-                                                 </td>
-                                                 <td className="p-4 text-gray-900">{tool?.name}</td>
-                                                 <td className="p-4 text-right font-mono font-bold">{tr.amount}</td>
-                                                 <td className="p-4 text-gray-500 text-xs">{tr.target}</td>
-                                             </tr>
-                                         );
-                                     })}
-                                 </tbody>
-                             </table>
-                         </div>
-                     </div>
+                 <div className="flex-1 overflow-x-auto">
+                     <table className="w-full text-sm text-left">
+                         <thead className="bg-gray-50 text-gray-500 font-medium border-b sticky top-0"><tr><th className="p-4">Дата</th><th className="p-4">Працівник</th><th className="p-4">Тип</th><th className="p-4">Інструмент</th><th className="p-4 text-right">К-сть</th><th className="p-4">Ціль</th></tr></thead>
+                         <tbody className="divide-y divide-gray-100">
+                             {transactions.map(tr => (
+                                 <tr key={tr.id} className="hover:bg-gray-50">
+                                     <td className="p-4 text-gray-500">{new Date(tr.date).toLocaleString('uk-UA')}</td>
+                                     <td className="p-4 font-bold">{tr.userName}</td>
+                                     <td className="p-4"><span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${tr.type === 'import' ? 'bg-green-100 text-green-700' : tr.type === 'usage' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>{tr.type}</span></td>
+                                     <td className="p-4">{items.find(i => i.id === tr.toolId)?.name || 'Unknown'}</td>
+                                     <td className="p-4 text-right font-bold">{tr.amount}</td>
+                                     <td className="p-4 text-gray-500 text-xs">{tr.target}</td>
+                                 </tr>
+                             ))}
+                         </tbody>
+                     </table>
                  </div>
              </div>
          )}
       </div>
 
-      {isFolderModalOpen && (
+      {/* --- MODAL: ITEM EDIT (Correction) --- */}
+      {isItemEditModalOpen && editingItem && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-sm p-6 m-4 md:m-0">
-                  <h3 className="font-bold text-lg mb-2">{folderForm.id ? 'Редагувати папку' : 'Нова папка'}</h3>
-                  <div className="text-xs text-gray-500 mb-4 flex items-center bg-gray-50 p-2 rounded">
-                      <CornerDownRight size={12} className="mr-1"/> 
-                      {folderForm.id ? 'Розташування' : 'Створення у'}: 
-                      <strong className="ml-1 text-gray-800">
-                          {activeTab === 'catalog' ? getBreadcrumbName(currentCatalogFolderId, 'catalog') : 
-                           activeTab === 'warehouse' ? getBreadcrumbName(currentWarehouseFolderId, 'warehouse') :
-                           getBreadcrumbName(currentProductionFolderId, 'production')}
-                      </strong>
+              <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+                  <div className="flex justify-between items-center mb-6">
+                      <h3 className="font-bold text-lg text-gray-900">Редагувати за залишки</h3>
+                      <button onClick={() => setIsItemEditModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
                   </div>
-                  
-                  <div className="space-y-4 mb-6">
-                      <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Назва</label>
-                          <input 
-                            className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
-                            placeholder="Назва папки" 
-                            value={folderForm.name} 
-                            onChange={e => setFolderForm({...folderForm, name: e.target.value})} 
-                            autoFocus 
-                          />
-                      </div>
-                      <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Колір</label>
-                          <div className="flex gap-2">
-                            {COLORS.map(c => (
-                                <button
-                                    key={c}
-                                    onClick={() => setFolderForm({...folderForm, color: c})}
-                                    className={`w-6 h-6 rounded-full border transition-transform ${folderForm.color === c ? 'ring-2 ring-offset-1 ring-slate-900 scale-110' : 'border-transparent'}`}
-                                    style={{ backgroundColor: c }}
-                                />
-                            ))}
+                  <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                          <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">На складі</label>
+                              <input type="number" className="w-full p-2.5 border rounded-lg font-bold" value={editingItem.quantity} onChange={e => setEditingItem({...editingItem, quantity: Number(e.target.value)})} />
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-blue-500 uppercase mb-1">У виробництві</label>
+                              <input type="number" className="w-full p-2.5 border rounded-lg font-bold" value={editingItem.productionQuantity} onChange={e => setEditingItem({...editingItem, productionQuantity: Number(e.target.value)})} />
                           </div>
                       </div>
-                  </div>
-
-                  <div className="flex justify-end gap-2">
-                      <button onClick={() => setIsFolderModalOpen(false)} className="px-4 py-2 text-gray-500">Скасувати</button>
-                      <button onClick={handleSaveFolder} className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">{folderForm.id ? 'Зберегти' : 'Створити'}</button>
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {isToolModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-2xl w-[95%] md:w-full md:max-w-md p-6 m-4 md:m-0">
-                  <h3 className="font-bold text-lg mb-4">{editingId ? 'Редагувати інструмент' : 'Новий інструмент'}</h3>
-                  <div className="space-y-4">
                       <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">Назва</label>
-                        <input className="w-full p-2 border rounded-lg" placeholder="Напр: Свердло 5мм" value={newTool.name || ''} onChange={e => setNewTool({...newTool, name: e.target.value})} />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Фото інструменту</label>
-                        <div className="flex items-start gap-4">
-                            <div className="w-24 h-24 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center relative overflow-hidden group hover:border-blue-400 transition-colors shrink-0">
-                                {newTool.photo ? (
-                                    <img src={newTool.photo} className="w-full h-full object-cover" />
-                                ) : (
-                                    <div className="text-center p-2">
-                                        <ImageIcon className="w-8 h-8 text-gray-300 mx-auto mb-1" />
-                                        <span className="text-[9px] text-gray-400 block leading-tight">Завантажити фото</span>
-                                    </div>
-                                )}
-                                <input 
-                                    type="file" 
-                                    accept="image/*"
-                                    className="absolute inset-0 opacity-0 cursor-pointer"
-                                    onChange={handleFileSelect}
-                                />
-                            </div>
-                            <div className="flex-1">
-                                <input 
-                                    className="w-full p-2 border rounded-lg text-sm mb-2" 
-                                    placeholder="Або вставте пряме посилання (URL)" 
-                                    value={newTool.photo || ''} 
-                                    onChange={e => setNewTool({...newTool, photo: e.target.value})} 
-                                />
-                            </div>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Одиниця виміру</label>
-                            <select className="w-full p-2 border rounded-lg bg-white" value={newTool.unit} onChange={e => setNewTool({...newTool, unit: e.target.value as UnitOfMeasure})}>
-                                <option value="pcs">Штуки (pcs)</option>
-                                <option value="kg">Кілограми (kg)</option>
-                                <option value="l">Літри (l)</option>
-                                <option value="pack">Упаковки (pack)</option>
-                                <option value="meter">Метри (m)</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Колірний маркер</label>
-                            <div className="flex gap-1.5 mt-1">
-                                {COLORS.map(c => (
-                                    <button
-                                        key={c}
-                                        onClick={() => setNewTool({ ...newTool, colorTag: c })}
-                                        className={`w-6 h-6 rounded-full border transition-transform ${newTool.colorTag === c ? 'ring-2 ring-offset-1 ring-slate-900 scale-110' : 'border-transparent'}`}
-                                        style={{ backgroundColor: c }}
-                                    />
-                                ))}
-                            </div>
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Опис</label>
-                        <textarea className="w-full p-2 border rounded-lg h-20 resize-none" placeholder="Характеристики..." value={newTool.description || ''} onChange={e => setNewTool({...newTool, description: e.target.value})} />
+                          <label className="block text-xs font-bold text-red-500 uppercase mb-1">Мін. поріг (Склад)</label>
+                          <input type="number" className="w-full p-2.5 border border-red-100 bg-red-50 rounded-lg font-bold text-red-700" value={editingItem.criticalQuantity || 5} onChange={e => setEditingItem({...editingItem, criticalQuantity: Number(e.target.value)})} />
                       </div>
                   </div>
-                  <div className="flex justify-end gap-2 mt-6">
-                      <button onClick={() => setIsToolModalOpen(false)} className="px-4 py-2 text-gray-500">Скасувати</button>
-                      <button onClick={handleCreateTool} disabled={isUploading} className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold disabled:opacity-50 flex items-center">
-                          {isUploading && <Loader size={16} className="animate-spin mr-2"/>}
-                          {editingId ? 'Зберегти' : 'Створити'}
+                  <div className="flex justify-end gap-3 mt-8">
+                      <button onClick={() => setIsItemEditModalOpen(false)} className="px-4 py-2 text-gray-500 font-bold hover:bg-gray-100 rounded-lg transition-all">Скасувати</button>
+                      <button onClick={handleEditItemSave} disabled={isActionInProgress} className="bg-slate-900 text-white px-6 py-2 rounded-lg font-bold hover:bg-slate-800 shadow-lg flex items-center transition-all">
+                         {isActionInProgress && <Loader size={18} className="animate-spin mr-2"/>} Зберегти
                       </button>
                   </div>
               </div>
           </div>
       )}
 
-      {isAddToWarehouseOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-md p-6 m-4 md:m-0">
-                  <h3 className="font-bold text-lg mb-1">Додати позицію з каталогу</h3>
-                  <div className="text-xs text-gray-500 mb-4 flex items-center bg-gray-50 p-2 rounded">
-                      <CornerDownRight size={12} className="mr-1"/> 
-                      Додавання у: <strong className="ml-1 text-gray-800">{getBreadcrumbName(currentWarehouseFolderId, 'warehouse')}</strong>
-                  </div>
-
-                  <div className="space-y-4">
-                      <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Виберіть інструмент</label>
-                          <SearchableSelect 
-                              options={tools.map(t => ({ value: t.id, label: t.name, image: t.photo }))}
-                              value={selectedToolId}
-                              onChange={setSelectedToolId}
-                              placeholder="Оберіть інструмент..."
-                          />
-                          <button 
-                            onClick={() => setIsToolModalOpen(true)}
-                            className="text-xs text-blue-600 font-bold mt-2 hover:underline flex items-center"
-                          >
-                            <Plus size={12} className="mr-1"/> Створити новий інструмент
-                          </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                          <div>
-                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Фактична кількість</label>
-                              <input 
-                                type="number" 
-                                className="w-full p-2 border rounded-lg font-bold"
-                                value={addStockQty}
-                                onChange={e => setAddStockQty(Number(e.target.value))}
-                              />
-                          </div>
-                          <div>
-                              <label className="block text-xs font-bold text-red-500 uppercase mb-1">Критична кількість</label>
-                              <input 
-                                type="number" 
-                                className="w-full p-2 border rounded-lg border-red-200 bg-red-50 font-bold text-red-700"
-                                value={addStockCritical}
-                                onChange={e => setAddStockCritical(Number(e.target.value))}
-                              />
-                          </div>
-                      </div>
-                  </div>
-
-                  <div className="flex justify-end gap-2 mt-6">
-                      <button onClick={() => setIsAddToWarehouseOpen(false)} className="px-4 py-2 text-gray-500">Скасувати</button>
-                      <button onClick={handleAddToWarehouse} disabled={!selectedToolId} className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold disabled:opacity-50">Додати</button>
-                  </div>
-              </div>
-          </div>
-      )}
-      
-      {isAddToProductionOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-md p-6 m-4 md:m-0">
-                  <h3 className="font-bold text-lg mb-1">Додати інструмент у виробництво</h3>
-                  <div className="text-xs text-gray-500 mb-4 flex items-center bg-gray-50 p-2 rounded">
-                      <CornerDownRight size={12} className="mr-1"/> 
-                      Додавання у: <strong className="ml-1 text-gray-800">{getBreadcrumbName(currentProductionFolderId, 'production')}</strong>
-                  </div>
-
-                  <div className="space-y-4">
-                      <div>
-                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Виберіть інструмент</label>
-                          <SearchableSelect 
-                              options={tools.map(t => ({ value: t.id, label: t.name, image: t.photo }))}
-                              value={selectedToolId}
-                              onChange={setSelectedToolId}
-                              placeholder="Оберіть інструмент..."
-                          />
-                          <button 
-                            onClick={() => setIsToolModalOpen(true)}
-                            className="text-xs text-blue-600 font-bold mt-2 hover:underline flex items-center"
-                          >
-                            <Plus size={12} className="mr-1"/> Створити новий інструмент
-                          </button>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-4">
-                          <div>
-                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Фактична кількість</label>
-                              <input 
-                                type="number" 
-                                className="w-full p-2 border rounded-lg font-bold"
-                                value={addStockQty}
-                                onChange={e => setAddStockQty(Number(e.target.value))}
-                              />
-                          </div>
-                          <div>
-                              <label className="block text-xs font-bold text-red-500 uppercase mb-1">Критична кількість</label>
-                              <input 
-                                type="number" 
-                                className="w-full p-2 border rounded-lg border-red-200 bg-red-50 font-bold text-red-700"
-                                value={addStockCritical}
-                                onChange={e => setAddStockCritical(Number(e.target.value))}
-                              />
-                          </div>
-                      </div>
-                  </div>
-
-                  <div className="flex justify-end gap-2 mt-6">
-                      <button onClick={() => setIsAddToProductionOpen(false)} className="px-4 py-2 text-gray-500">Скасувати</button>
-                      <button onClick={handleAddToProduction} disabled={!selectedToolId} className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold disabled:opacity-50">Додати</button>
-                  </div>
-              </div>
-          </div>
-      )}
-
+      {/* --- MODAL: RESTOCK / MOVE --- */}
       {isStockModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-sm p-6 m-4 md:m-0">
-                  <h3 className="font-bold text-lg mb-4">{stockOp.type === 'add' ? 'Поповнення складу' : 'Переміщення на виробництво'}</h3>
+              <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+                  <h3 className="font-bold text-lg mb-6">{stockOp.type === 'add' ? 'Поповнення складу' : 'Переміщення в цех'}</h3>
                   <div className="space-y-4">
                       <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Кількість</label>
-                        <input type="number" className="w-full p-2 border rounded-lg font-bold text-lg" value={stockOp.qty} onChange={e => setStockOp({...stockOp, qty: Number(e.target.value)})} autoFocus />
+                        <input type="number" className="w-full p-3 border rounded-xl font-bold text-2xl text-center bg-gray-50 focus:bg-white transition-all outline-none" value={stockOp.qty || ''} placeholder="0" onChange={e => setStockOp({...stockOp, qty: Number(e.target.value)})} autoFocus />
                       </div>
                       {stockOp.type === 'move' && (
                           <div>
                             <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Куди / Коментар</label>
-                            <input className="w-full p-2 border rounded-lg" placeholder="Напр: Верстат 1" value={stockOp.target} onChange={e => setStockOp({...stockOp, target: e.target.value})} />
+                            <input className="w-full p-3 border rounded-xl bg-gray-50 focus:bg-white outline-none" placeholder="Верстат 1" value={stockOp.target} onChange={e => setStockOp({...stockOp, target: e.target.value})} />
                           </div>
                       )}
                   </div>
-                  <div className="flex justify-end gap-2 mt-6">
-                      <button onClick={() => setIsStockModalOpen(false)} className="px-4 py-2 text-gray-500">Скасувати</button>
-                      <button onClick={executeStockOp} className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Підтвердити</button>
+                  <div className="flex gap-3 mt-8">
+                      <button onClick={() => setIsStockModalOpen(false)} className="flex-1 py-3 text-gray-500 font-bold hover:bg-gray-100 rounded-xl transition-all">Скасувати</button>
+                      <button onClick={executeStockOp} disabled={isActionInProgress} className="flex-1 bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 shadow-xl transition-all">Підтвердити</button>
                   </div>
               </div>
           </div>
       )}
 
+      {/* --- MODAL: CONSUME --- */}
       {isUsageModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-sm p-6 m-4 md:m-0">
-                  <h3 className="font-bold text-lg mb-4">Взяти інструмент</h3>
+              <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+                  <h3 className="font-bold text-lg mb-6">Взяти інструмент</h3>
                   <div className="space-y-4">
                       <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Кількість</label>
-                        <input type="number" className="w-full p-2 border rounded-lg font-bold text-lg" value={usageOp.qty} onChange={e => setUsageOp({...usageOp, qty: Number(e.target.value)})} autoFocus />
+                        <input type="number" className="w-full p-3 border rounded-xl font-bold text-2xl text-center bg-gray-50 focus:bg-white transition-all outline-none" value={usageOp.qty || ''} placeholder="0" onChange={e => setUsageOp({...usageOp, qty: Number(e.target.value)})} autoFocus />
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Для чого / Примітка</label>
-                        <input className="w-full p-2 border rounded-lg" placeholder="Напр: Зламав фрезу" value={usageOp.note} onChange={e => setUsageOp({...usageOp, note: e.target.value})} />
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Примітка</label>
+                        <input className="w-full p-3 border rounded-xl bg-gray-50 focus:bg-white outline-none" placeholder="Ціль..." value={usageOp.note} onChange={e => setUsageOp({...usageOp, note: e.target.value})} />
                       </div>
                   </div>
-                  <div className="flex justify-end gap-2 mt-6">
-                      <button onClick={() => setIsUsageModalOpen(false)} className="px-4 py-2 text-gray-500">Скасувати</button>
-                      <button onClick={executeUsageOp} className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Підтвердити</button>
+                  <div className="flex gap-3 mt-8">
+                      <button onClick={() => setIsUsageModalOpen(false)} className="flex-1 py-3 text-gray-500 font-bold hover:bg-gray-100 rounded-xl transition-all">Скасувати</button>
+                      <button onClick={executeUsageOp} disabled={isActionInProgress} className="flex-1 bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 shadow-xl transition-all">Видати</button>
                   </div>
               </div>
           </div>
       )}
 
-      {deleteConfirm && (
-        <DeleteConfirmModal 
-            isOpen={!!deleteConfirm}
-            title={deleteConfirm.type === 'tool' ? 'Видалити інструмент?' : 'Видалити папку?'}
-            message="Ви впевнені? Це незворотня дія."
-            onClose={() => setDeleteConfirm(null)}
-            onConfirm={confirmDelete}
-            isDeleting={isDeleting}
-        />
+      {/* --- MODAL: NEW TOOL --- */}
+      {isToolModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+                  <h3 className="font-bold text-lg mb-6">{editingId ? 'Редагувати в каталозі' : 'Новий інструмент'}</h3>
+                  <div className="space-y-4">
+                      <input className="w-full p-2.5 border rounded-lg font-bold" placeholder="Назва інструменту" value={newTool.name || ''} onChange={e => setNewTool({...newTool, name: e.target.value})} />
+                      <div className="flex gap-4">
+                        <div className="w-24 h-24 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center relative overflow-hidden group hover:border-blue-400 transition-all cursor-pointer shrink-0">
+                            {newTool.photo ? <img src={newTool.photo} className="w-full h-full object-cover" /> : <ImageIcon className="text-gray-300" />}
+                            <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileSelect} />
+                        </div>
+                        <div className="flex-1 space-y-4">
+                            <select className="w-full p-2.5 border rounded-lg bg-white font-medium" value={newTool.unit} onChange={e => setNewTool({...newTool, unit: e.target.value as UnitOfMeasure})}>
+                                <option value="pcs">Штуки (pcs)</option><option value="kg">Кілограми (kg)</option><option value="meter">Метри (m)</option>
+                            </select>
+                            <div className="flex gap-1.5">
+                                {COLORS.map(c => <button key={c} onClick={() => setNewTool({...newTool, colorTag: c})} className={`w-5 h-5 rounded-full border ${newTool.colorTag === c ? 'ring-2 ring-slate-900 ring-offset-1' : ''}`} style={{ backgroundColor: c }} />)}
+                            </div>
+                        </div>
+                      </div>
+                      <textarea className="w-full p-2.5 border rounded-lg h-20 resize-none outline-none focus:ring-2 focus:ring-blue-500" placeholder="Опис / характеристики..." value={newTool.description || ''} onChange={e => setNewTool({...newTool, description: e.target.value})} />
+                  </div>
+                  <div className="flex justify-end gap-3 mt-8">
+                      <button onClick={() => setIsToolModalOpen(false)} className="px-4 py-2 text-gray-500 font-bold">Скасувати</button>
+                      <button onClick={handleCreateTool} disabled={isActionInProgress} className="bg-slate-900 text-white px-8 py-2 rounded-lg font-bold hover:bg-slate-800 shadow-lg transition-all flex items-center">{isActionInProgress && <Loader size={16} className="animate-spin mr-2"/>} Зберегти</button>
+                  </div>
+              </div>
+          </div>
       )}
+
+      {isFolderModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+                  <h3 className="font-bold text-lg mb-4">{folderForm.id ? 'Редагувати папку' : 'Нова папка'}</h3>
+                  <div className="space-y-4">
+                      <input className="w-full p-2 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500" placeholder="Назва" value={folderForm.name} onChange={e => setFolderForm({...folderForm, name: e.target.value})} />
+                      <div className="flex gap-2">
+                        {COLORS.map(c => (<button key={c} onClick={() => setFolderForm({...folderForm, color: c})} className={`w-6 h-6 rounded-full border transition-all ${folderForm.color === c ? 'ring-2 ring-slate-900 ring-offset-2' : ''}`} style={{ backgroundColor: c }} />))}
+                      </div>
+                  </div>
+                  <div className="flex justify-end gap-2 mt-6">
+                      <button onClick={() => setIsFolderModalOpen(false)} className="px-4 py-2 text-gray-500 font-bold">Скасувати</button>
+                      <button onClick={handleSaveFolder} className="px-6 py-2 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 transition-all">Зберегти</button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {deleteConfirm && (<DeleteConfirmModal isOpen={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} onConfirm={confirmDelete} isDeleting={isDeleting} />)}
     </div>
   );
 };
