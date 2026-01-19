@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { AttendanceRecord, AbsenceType, TransportMode, Break, User, WorkSchedule, AdditionalExpense } from '../types';
 import { API } from '../services/api';
@@ -16,6 +15,16 @@ interface AttendanceModalProps {
   onSave: () => void;
   isAdmin?: boolean;
 }
+
+// Хелпер для форматування годин
+const formatTime = (val: number) => {
+  if (!val || isNaN(val)) return '0г';
+  const hrs = Math.floor(val);
+  const mins = Math.round((val - hrs) * 60);
+  if (mins === 0) return `${hrs}г`;
+  if (hrs === 0) return `${mins}хв`;
+  return `${hrs}г ${mins}хв`;
+};
 
 export const AttendanceModal: React.FC<AttendanceModalProps> = ({ 
   date, userId, isOpen, onClose, onSave, isAdmin = false 
@@ -403,8 +412,8 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
                 {/* Block 1: Work */}
                 <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
                     <div className="text-xs text-gray-500 font-bold uppercase mb-1">РОБОТА</div>
-                    <div className="text-3xl font-bold text-gray-800">
-                        {activeTab === 'work' ? liveStats.hours : 0} <span className="text-sm font-normal text-gray-400">год</span>
+                    <div className="text-2xl font-bold text-gray-800">
+                        {activeTab === 'work' ? formatTime(liveStats.hours) : '0г'}
                     </div>
                 </div>
 
@@ -413,13 +422,12 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
                     <div className="text-xs text-gray-500 font-bold uppercase mb-1">
                         {activeTab === 'work' ? 'ПОНАДНОРМОВІ' : 'ВІДСУТНІСТЬ'}
                     </div>
-                    <div className={`text-3xl font-bold ${activeTab === 'work' && liveStats.overtime > 0 ? 'text-orange-500' : 'text-gray-400'}`}>
+                    <div className={`text-2xl font-bold ${activeTab === 'work' && liveStats.overtime > 0 ? 'text-orange-500' : 'text-gray-400'}`}>
                         {activeTab === 'work' ? (
-                            liveStats.overtime > 0 ? `+${liveStats.overtime}` : '0'
+                            liveStats.overtime > 0 ? `+${formatTime(liveStats.overtime)}` : '0г'
                         ) : (
-                            '0' 
+                            '0г' 
                         )}
-                        <span className="text-sm font-normal text-gray-400 ml-1">год</span>
                     </div>
                 </div>
 
@@ -447,7 +455,7 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
                         className="w-5 h-5 text-orange-600 rounded border-orange-300 focus:ring-orange-500 cursor-pointer"
                     />
                     <label htmlFor="approveOvertime" className="ml-3 text-sm font-bold text-orange-800 cursor-pointer select-none">
-                        Погодити оплату понаднормових (+{liveStats.overtime} год)
+                        Погодити оплату понаднормових (+{formatTime(liveStats.overtime)})
                     </label>
                 </div>
             )}

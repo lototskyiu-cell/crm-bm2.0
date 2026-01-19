@@ -61,7 +61,6 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
 
   const [draggedItem, setDraggedItem] = useState<{ type: 'tool' | 'folder' | 'warehouseItem' | 'productionItem', id: string } | null>(null);
   
-  // Updated state to include type
   const [deleteConfirm, setDeleteConfirm] = useState<{isOpen: boolean, type: 'tool' | 'folder', id: string} | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -100,7 +99,54 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
       return folder ? folder.name : '...';
   };
 
-  // ... (Keep existing modals open/save/delete logic) ...
+  const handleExportInventory = () => {
+    let itemsToExport: any[] = [];
+    const headers = ["Назва", "Одиниця", "Кількість", "Критичний поріг", "Статус"];
+
+    if (activeTab === 'warehouse') {
+        const filtered = filterItems(warehouseItems);
+        itemsToExport = filtered.map(item => {
+            const wItem = item as WarehouseItem;
+            const t = tools.find(tool => tool.id === wItem.toolId);
+            const status = wItem.quantity <= wItem.criticalQuantity ? "КРИТИЧНО" : (wItem.quantity <= wItem.criticalQuantity * 1.5 ? "МАЛО" : "OK");
+            return { name: t?.name || '?', unit: t?.unit || '?', qty: wItem.quantity, crit: wItem.criticalQuantity, status };
+        });
+    } else if (activeTab === 'production') {
+        const filtered = filterItems(productionItems);
+        itemsToExport = filtered.map(item => {
+            const pItem = item as ProductionItem;
+            const t = tools.find(tool => tool.id === pItem.toolId);
+            const status = pItem.quantity <= pItem.criticalQuantity ? "КРИТИЧНО" : "OK";
+            return { name: t?.name || '?', unit: t?.unit || '?', qty: pItem.quantity, crit: pItem.criticalQuantity, status };
+        });
+    } else if (activeTab === 'catalog') {
+        const filtered = filterTools(tools.filter(t => t.folderId === currentCatalogFolderId));
+        itemsToExport = filtered.map(t => ({
+            name: t.name, unit: t.unit, qty: '-', crit: '-', status: '-'
+        }));
+    }
+
+    if (itemsToExport.length === 0) {
+      alert("Немає даних для експорту");
+      return;
+    }
+
+    const rows = itemsToExport.map(item => {
+      const safeName = (item.name || "").replace(/;/g, ",");
+      return `${safeName};${item.unit};${item.qty};${item.crit};${item.status}`;
+    });
+
+    const csvContent = "\uFEFF" + [headers.join(";"), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `inventory_${activeTab}_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const openNewFolderModal = () => {
       setFolderForm({ id: null, name: '', color: '#3b82f6' });
       setIsFolderModalOpen(true);
@@ -218,7 +264,6 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
           if (deleteConfirm.type === 'tool') {
               await API.deleteTool(deleteConfirm.id);
           } else {
-              // Delete Folder
               await API.deleteToolFolder(deleteConfirm.id);
               store.deleteToolFolder(deleteConfirm.id);
               refreshData();
@@ -530,7 +575,6 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
          {/* CATALOG TAB */}
          {activeTab === 'catalog' && (
              <div className="h-full flex flex-col">
-                 {/* ... (breadcrumb logic remains same) */}
                  <div 
                     className={`p-4 border-b border-gray-100 flex justify-between items-center ${draggedItem ? 'bg-blue-50 border-blue-200' : 'bg-gray-50'}`}
                     onDragOver={handleDragOver}
@@ -546,6 +590,9 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
                                 <Clipboard size={16} className="mr-1"/> Paste ({clipboard.op})
                             </button>
                         )}
+                        <button onClick={handleExportInventory} className="bg-white border hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center">
+                            <Download size={16} className="mr-1"/> Експорт
+                        </button>
                         <button onClick={openNewFolderModal} className="bg-white border hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center">
                             <FolderPlus size={16} className="mr-1"/> Папка
                         </button>
@@ -560,7 +607,6 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
                  </div>
 
                  <div className="p-6 overflow-y-auto grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 align-start content-start">
-                     {/* ... (folder/tool rendering same logic) ... */}
                      {filterFolders(catalogFolders).map(f => (
                          <div key={f.id} 
                               onClick={() => setCurrentCatalogFolderId(f.id)}
@@ -629,6 +675,9 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
                                 <Clipboard size={16} className="mr-1"/> Paste ({clipboard.op})
                             </button>
                         )}
+                        <button onClick={handleExportInventory} className="bg-white border hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center">
+                            <Download size={16} className="mr-1"/> Експорт
+                        </button>
                         <button onClick={openNewFolderModal} className="bg-white border hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center">
                             <FolderPlus size={16} className="mr-1"/> Папка
                         </button>
@@ -748,6 +797,9 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
                                 <Clipboard size={16} className="mr-1"/> Paste ({clipboard.op})
                             </button>
                         )}
+                        <button onClick={handleExportInventory} className="bg-white border hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center">
+                            <Download size={16} className="mr-1"/> Експорт
+                        </button>
                         <button onClick={openNewFolderModal} className="bg-white border hover:bg-gray-50 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center">
                             <FolderPlus size={16} className="mr-1"/> Папка
                         </button>
@@ -943,11 +995,11 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
 
       {isToolModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-md p-6 m-4 md:m-0">
+              <div className="bg-white rounded-xl shadow-2xl w-[95%] md:w-full md:max-w-md p-6 m-4 md:m-0">
                   <h3 className="font-bold text-lg mb-4">{editingId ? 'Редагувати інструмент' : 'Новий інструмент'}</h3>
                   <div className="space-y-4">
                       <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Назва</label>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">Назва</label>
                         <input className="w-full p-2 border rounded-lg" placeholder="Напр: Свердло 5мм" value={newTool.name || ''} onChange={e => setNewTool({...newTool, name: e.target.value})} />
                       </div>
                       

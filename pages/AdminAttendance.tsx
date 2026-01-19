@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, AttendanceRecord, WorkSchedule } from '../types';
 import { API } from '../services/api';
@@ -8,6 +7,16 @@ import { DeleteConfirmModal } from '../components/DeleteConfirmModal'; // Import
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, addMonths, subMonths } from 'date-fns';
 import { uk } from 'date-fns/locale';
 import { Calendar, DollarSign, Info, Clock, AlertTriangle, Filter, Download, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Users, Table as TableIcon, FileText, Loader, Trash2 } from 'lucide-react';
+
+// Хелпер для форматування годин
+const formatTime = (val: number) => {
+  if (!val || isNaN(val)) return '0г';
+  const hrs = Math.floor(val);
+  const mins = Math.round((val - hrs) * 60);
+  if (mins === 0) return `${hrs}г`;
+  if (hrs === 0) return `${mins}хв`;
+  return `${hrs}г ${mins}хв`;
+};
 
 export const AdminAttendance: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -331,10 +340,10 @@ export const AdminAttendance: React.FC = () => {
                       >
                         {record && record.type === 'work' && (
                           <div className="flex flex-col items-center justify-center h-full w-full space-y-0.5">
-                            <span className="font-bold text-gray-800 text-[10px] leading-none">{isNaN(duration) ? 0 : duration}г</span>
+                            <span className="font-bold text-gray-800 text-[10px] leading-none">{formatTime(duration)}</span>
                             <span className="text-[9px] text-gray-500 leading-none">{isNaN(dailyPay) ? 0 : Math.round(dailyPay)}₴</span>
                             {overtimeHours > 0 && (
-                              <div className={`w-1.5 h-1.5 rounded-full ${record.overtimeApproved ? 'bg-green-500' : 'bg-yellow-500'}`} title={`Overtime: +${overtimeHours}h`}></div>
+                              <div className={`w-1.5 h-1.5 rounded-full ${record.overtimeApproved ? 'bg-green-500' : 'bg-yellow-500'}`} title={`Overtime: +${formatTime(overtimeHours)}`}></div>
                             )}
                           </div>
                         )}
@@ -423,11 +432,10 @@ export const AdminAttendance: React.FC = () => {
            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-between">
               <div className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-2">Загальні години</div>
               <div className="flex items-baseline">
-                 <span className="text-3xl font-bold text-gray-900">{globalStats.totalHours.toFixed(1)}</span>
-                 <span className="ml-1 text-sm text-gray-500">год</span>
+                 <span className="text-3xl font-bold text-gray-900">{formatTime(globalStats.totalHours)}</span>
               </div>
               <div className="mt-2 text-xs text-orange-600 font-medium">
-                 {globalStats.totalOvertime > 0 ? `+${globalStats.totalOvertime.toFixed(1)} год понаднормових` : 'Без перепрацювань'}
+                 {globalStats.totalOvertime > 0 ? `+${formatTime(globalStats.totalOvertime)} понаднормових` : 'Без перепрацювань'}
               </div>
            </div>
 
@@ -486,7 +494,7 @@ export const AdminAttendance: React.FC = () => {
                      </div>
                      <div className="text-right hidden sm:block">
                         <div className="text-xs text-gray-400 uppercase font-bold mb-1">Години</div>
-                        <div className="text-xl font-bold text-gray-700">{stats.hours.toFixed(1)}</div>
+                        <div className="text-xl font-bold text-gray-700">{formatTime(stats.hours)}</div>
                      </div>
                      <div className="bg-gray-100 p-2 rounded-full text-gray-500">
                         {isExpanded ? <ChevronUp size={20}/> : <ChevronDown size={20}/>}
@@ -506,7 +514,7 @@ export const AdminAttendance: React.FC = () => {
                          <div className="bg-white p-3 rounded-lg border border-gray-200">
                             <div className="text-xs text-gray-400 uppercase mb-1">Понаднормові</div>
                             <div className="font-bold text-orange-600">
-                               {stats.overtime > 0 ? `+${stats.overtime.toFixed(1)} год` : '-'}
+                               {stats.overtime > 0 ? `+${formatTime(stats.overtime)}` : '-'}
                             </div>
                          </div>
                          <div className="bg-white p-3 rounded-lg border border-gray-200">
@@ -569,7 +577,7 @@ export const AdminAttendance: React.FC = () => {
                                               )}
                                            </td>
                                            <td className="p-3 text-center text-gray-700 font-medium">
-                                              {r.type === 'work' ? duration : '-'}
+                                              {r.type === 'work' ? formatTime(duration) : '-'}
                                            </td>
                                            <td className="p-3 text-right text-gray-600">{salary > 0 ? salary : '-'}</td>
                                            <td className="p-3 text-right text-blue-600">{transport > 0 ? transport : '-'}</td>

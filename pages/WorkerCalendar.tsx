@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, AttendanceRecord, WorkSchedule } from '../types';
 import { API } from '../services/api';
@@ -12,6 +11,16 @@ import { ChevronLeft, ChevronRight, Loader, CheckCircle, Clock, XCircle, Trash2 
 interface WorkerCalendarProps {
   currentUser: User;
 }
+
+// Хелпер для форматування годин
+const formatTime = (val: number) => {
+  if (!val || isNaN(val)) return '0г';
+  const hrs = Math.floor(val);
+  const mins = Math.round((val - hrs) * 60);
+  if (mins === 0) return `${hrs}г`;
+  if (hrs === 0) return `${mins}хв`;
+  return `${hrs}г ${mins}хв`;
+};
 
 export const WorkerCalendar: React.FC<WorkerCalendarProps> = ({ currentUser }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -170,7 +179,7 @@ export const WorkerCalendar: React.FC<WorkerCalendarProps> = ({ currentUser }) =
                       const hours = (record.workedMinutes || 0) / 60;
                       statusLabel = (
                           <div className="flex flex-col items-end">
-                             <span className="text-xl font-bold text-gray-800">{hours.toFixed(1)} год</span>
+                             <span className="text-xl font-bold text-gray-800">{formatTime(hours)}</span>
                              {record.verifiedByAdmin ? (
                                 <span className="text-xs text-green-600 font-bold flex items-center"><CheckCircle size={10} className="mr-1"/> Перевірено</span>
                              ) : (
@@ -283,7 +292,7 @@ export const WorkerCalendar: React.FC<WorkerCalendarProps> = ({ currentUser }) =
                     label = 'В обробці';
                     icon = <Clock size={16} className="text-blue-500" />;
                 }
-                if (record.workedMinutes) hours = (record.workedMinutes / 60).toFixed(1);
+                if (record.workedMinutes) hours = formatTime(record.workedMinutes / 60);
                 }
             }
 
@@ -326,7 +335,7 @@ export const WorkerCalendar: React.FC<WorkerCalendarProps> = ({ currentUser }) =
                     </div>
                     {hours && (
                         <div className={`text-xs font-mono mt-1 text-left opacity-100 ${textClass}`}>
-                        {hours} год
+                        {hours}
                         </div>
                     )}
                     </div>
@@ -361,11 +370,11 @@ export const WorkerCalendar: React.FC<WorkerCalendarProps> = ({ currentUser }) =
               <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
                   <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Загальні години</div>
                   <div className="text-3xl font-bold text-gray-800">
-                      {monthlyStats.totalHours.toFixed(1)} <span className="text-sm font-normal text-gray-400">год</span>
+                      {formatTime(monthlyStats.totalHours)}
                   </div>
                   {monthlyStats.overtimeMinutes > 0 && (
                       <div className="mt-1 text-xs text-orange-500 font-bold">
-                          +{ (monthlyStats.overtimeMinutes / 60).toFixed(1) } год понаднормових
+                          +{formatTime(monthlyStats.overtimeMinutes / 60)} понаднормових
                       </div>
                   )}
               </div>
