@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { User, AttendanceRecord, WorkSchedule } from '../types';
 import { API } from '../services/api';
@@ -102,10 +103,12 @@ export const AdminAttendance: React.FC = () => {
         }
     }
 
+    if (record.verifiedByAdmin) return 'bg-green-50 border-green-200';
+
     const status = PayrollService.getStatusColor(record, user, schedules);
     if (status === 'red') return 'bg-red-50 hover:bg-red-100 border-red-200';
     if (status === 'yellow') return 'bg-yellow-50 hover:bg-yellow-100 border-yellow-200';
-    return 'bg-green-50 hover:bg-green-100 border-green-200';
+    return 'bg-white border-gray-100';
   };
 
   const renderAbsenceBadge = (type?: string) => {
@@ -336,14 +339,32 @@ export const AdminAttendance: React.FC = () => {
                       <td 
                         key={day.toString()} 
                         onClick={() => handleCellClick(user, day)}
-                        className={`border-r cursor-pointer transition-all h-14 p-0.5 align-middle text-center relative group/cell ${statusClass}`}
+                        className={`border-r cursor-pointer transition-all h-14 p-0 align-middle text-center relative group/cell ${statusClass}`}
                       >
                         {record && record.type === 'work' && (
-                          <div className="flex flex-col items-center justify-center h-full w-full space-y-0.5">
-                            <span className="font-bold text-gray-800 text-[10px] leading-none">{formatTime(duration)}</span>
+                          <div className={`
+                            relative h-full w-full p-2 flex flex-col items-center justify-center border rounded transition-colors
+                            ${record.verifiedByAdmin ? 'bg-green-50 border-green-200' : 'bg-white border-gray-100'}
+                          `}>
+                            {/* Відображення годин */}
+                            <span className={`font-bold ${duration > 8 ? 'text-blue-600' : 'text-gray-800'} text-[10px] leading-none mb-0.5`}>
+                              {formatTime(duration)}
+                            </span>
                             <span className="text-[9px] text-gray-500 leading-none">{isNaN(dailyPay) ? 0 : Math.round(dailyPay)}₴</span>
-                            {overtimeHours > 0 && (
-                              <div className={`w-1.5 h-1.5 rounded-full ${record.overtimeApproved ? 'bg-green-500' : 'bg-yellow-500'}`} title={`Overtime: +${formatTime(overtimeHours)}`}></div>
+                            
+                            {/* ЖОВТИЙ КРУЖЕЧОК: Є переробіток, але не погоджено */} 
+                            {record.verifiedByAdmin && duration > 8 && !record.overtimeApproved && (
+                              <div className="absolute top-1 right-1 w-2 h-2 bg-yellow-400 rounded-full shadow-sm animate-pulse"></div>
+                            )}
+
+                            {/* ЗЕЛЕНИЙ КРУЖЕЧОК (Опціонально): Понаднормові погоджено */} 
+                            {record.verifiedByAdmin && duration > 8 && record.overtimeApproved && (
+                              <div className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full shadow-sm"></div>
+                            )}
+
+                            {/* Backwards compatibility for unverified view or regular hours */}
+                            {!record.verifiedByAdmin && overtimeHours > 0 && (
+                                <div className={`w-1.5 h-1.5 rounded-full ${record.overtimeApproved ? 'bg-green-500' : 'bg-yellow-500'} mt-1`}></div>
                             )}
                           </div>
                         )}
