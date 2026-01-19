@@ -7,7 +7,7 @@ import { NotificationBell } from '../components/NotificationBell';
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal';
 import { usePermissions } from '../hooks/usePermissions';
 import { Plus, MoreHorizontal, Calendar, Box, Settings, CheckCircle, Clock, FileText, Wrench, X, Image as ImageIcon, Pencil, Trash2, Loader, AlertTriangle, ChevronDown, Check, Archive, RotateCcw, Lock } from 'lucide-react';
-import { doc, updateDoc, collection, query, where, getDocs } from "firebase/firestore";
+import { doc, updateDoc, collection, query, where, getDocs, onSnapshot, orderBy } from "firebase/firestore";
 import { db } from "../services/firebase";
 
 interface TaskBoardProps {
@@ -132,6 +132,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
   const [techDocs, setTechDocs] = useState<{setupMap: SetupMap | null, productDrawingUrl: string | null}>({ setupMap: null, productDrawingUrl: null });
   const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
 
+  // --- ROLE-BASED TASK FETCHING ---
   useEffect(() => {
     let unsubscribeTasks: () => void;
     let unsubscribeOrders: () => void;
@@ -146,8 +147,41 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
         setUsers(usersData);
         setTools(toolsData);
 
-        unsubscribeTasks = API.subscribeToTasks((data) => {
-          setTasks(data);
+        // 🎯 Створюємо кастомний запит залежно від ролі
+        const tasksRef = collection(db, 'tasks');
+        let taskQuery;
+
+        if (currentUser.role === 'admin') {
+          // Адмін бачить все
+          taskQuery = query(tasksRef, orderBy('createdAt', 'desc'));
+        } else {
+          // Працівник бачить тільки ТІ, де він у списку виконавців
+          // В Firestore поле називається assignedUserIds (масив)
+          taskQuery = query(
+            tasksRef, 
+            where('assignedUserIds', 'array-contains', currentUser.id)
+          );
+        }
+
+        // Підписка на реальний час з фільтром ролі
+        unsubscribeTasks = onSnapshot(taskQuery, (snapshot) => {
+          const tasksData = snapshot.docs.map(docSnapshot => {
+            const data = docSnapshot.data();
+            // Мапінг під інтерфейс Task (ідентично логіці в API)
+            return {
+              id: docSnapshot.id,
+              ...data,
+              assigneeIds: data.assignedUserIds || [],
+              plannedQuantity: data.planQuantity || 0,
+              completedQuantity: data.factQuantity || 0,
+              deadline: data.dueDate || data.deadline,
+            } as Task;
+          });
+          
+          setTasks(tasksData.filter((t: any) => !t.deleted));
+          setIsLoading(false);
+        }, (error) => {
+          console.error("Task subscription error:", error);
           setIsLoading(false);
         });
 
@@ -172,7 +206,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
       if (unsubscribeOrders) unsubscribeOrders();
       if (unsubscribeDrawings) unsubscribeDrawings();
     };
-  }, []);
+  }, [currentUser.id, currentUser.role]);
 
   // --- SMART MATCH DOCUMENTATION FETCH ---
   useEffect(() => {
@@ -183,19 +217,14 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
       }
 
       try {
-        // Визначаємо ID виробу через замовлення
         const order = orders.find(o => o.id === selectedTask.orderId);
         const productId = order?.productId;
 
         if (!productId) {
-          console.log("📄 Пошук доків: Просте завдання або відсутній productId.");
           setTechDocs({ setupMap: null, productDrawingUrl: null });
           return;
         }
 
-        console.log("🔍 Шукаю доки для етапу:", selectedTask.title, "| Виріб ID:", productId);
-
-        // 1. Шукаємо всі карти наладки для цього ВИРОБУ у Firestore
         const qCharts = query(
           collection(db, 'setupMaps'), 
           where('productCatalogId', '==', productId)
@@ -203,32 +232,23 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
         const chartsSnap = await getDocs(qCharts);
         const allProductMaps = chartsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as SetupMap));
 
-        console.log(`📊 Шукаю доки для етапу: ${selectedTask.title} | Знайдено карт: ${allProductMaps.length}`);
-
-        // 2. Фільтруємо (Smart Match)
-        // Витягуємо чисту назву етапу, якщо заголовок формату "254-Б - Токарка"
         const taskTitleBase = selectedTask.title.includes(' - ') 
             ? selectedTask.title.split(' - ').slice(1).join(' - ').trim().toLowerCase()
             : selectedTask.title.trim().toLowerCase();
 
         const matchedMap = allProductMaps.find(map => {
             const mapName = map.name.toLowerCase();
-            // Перевіряємо точний збіг або входження назви
             return mapName === taskTitleBase || 
                    mapName.includes(taskTitleBase) || 
                    taskTitleBase.includes(mapName);
         });
 
-        // 3. Шукаємо креслення виробу (Product Drawing)
         let prodDrawing: string | null = null;
         const product = await API.getProduct(productId);
         if (product && product.drawingId) {
             const dwg = drawings.find(d => d.id === product.drawingId);
             if (dwg) prodDrawing = dwg.photo;
         }
-
-        if (matchedMap) console.log("✅ Смарт-пошук успішний:", matchedMap.name);
-        else console.log("❌ Смарт-пошук не знайшов відповідної карти для тексту:", taskTitleBase);
 
         setTechDocs({ 
             setupMap: matchedMap || null, 

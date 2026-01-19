@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { API } from '../services/api';
 import { store } from '../services/mockStore'; 
 import { Task, ProductionReport, User, Order } from '../types';
-import { CheckCircle, AlertCircle, FileText, Plus, Search, X, Download, ArrowRight, CheckSquare, Square, Pencil, Loader, Save, Link, Package } from 'lucide-react';
+import { CheckCircle, AlertCircle, FileText, Plus, Search, X, Download, ArrowRight, CheckSquare, Square, Pencil, Loader, Save, Link, Package, ClipboardCheck } from 'lucide-react';
 import { collection, query, where, getDocs, writeBatch, doc, increment, serverTimestamp, getDoc, updateDoc, addDoc } from "firebase/firestore";
 import { db } from "../services/firebase";
 
@@ -34,6 +34,10 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
   const [note, setNote] = useState('');
   const [batchCode, setBatchCode] = useState(''); 
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Derived State for Task Type
+  const selectedTask = tasks.find(t => t.id === selectedTaskId);
+  const isSimpleTask = selectedTask?.type === 'simple';
 
   // Consumption Logic State
   const [consumptionGroups, setConsumptionGroups] = useState<ConsumptionGroup[]>([]);
@@ -76,6 +80,11 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
 
   // --- LOGIC TO FETCH FROM setup_cards ---
   useEffect(() => {
+      if (isSimpleTask) {
+          setConsumptionGroups([]);
+          return;
+      }
+
       const calculateConsumption = async () => {
           setConsumptionGroups([]); 
 
@@ -135,7 +144,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
       };
       
       calculateConsumption();
-  }, [selectedTaskId, qty, tasks, orders, reports]);
+  }, [selectedTaskId, qty, tasks, orders, reports, isSimpleTask]);
 
   const toggleBatchSelection = (groupIndex: number, batchId: string) => {
       const newGroups = [...consumptionGroups];
@@ -158,15 +167,17 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
   };
 
   const handleSubmit = async () => {
-    // --- 🕵️‍♂️ DEBUGGING BLOCK ---
-    console.log("=== REPORT SUBMISSION START ===");
-    console.log("🎯 Selected Task ID from UI:", selectedTaskId);
+    if (!selectedTaskId) {
+        alert("Оберіть завдання!");
+        return;
+    }
 
     const currentTask = tasks.find(t => t.id === selectedTaskId);
     const currentOrder = currentTask?.orderId ? orders.find(o => o.id === currentTask.orderId) : null;
     
-    if (!qty) {
-        alert("Введіть кількість!");
+    // Validate Quantity only for production tasks
+    if (!isSimpleTask && !qty) {
+        alert("Введіть кількість для виробничого завдання!");
         return;
     }
 
@@ -181,8 +192,8 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
     setIsSubmitting(true);
 
     try {
-        const qtyNumber = Number(qty);
-        const scrapNumber = Number(scrap) || 0;
+        const qtyNumber = isSimpleTask ? 0 : Number(qty);
+        const scrapNumber = isSimpleTask ? 0 : (Number(scrap) || 0);
 
         // Collect consumed IDs
         const allSourceBatchIds: string[] = [];
@@ -199,71 +210,36 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
             scrapQuantity: scrapNumber,
             notes: note,
             status: 'pending',
-            type: 'production',
+            type: isSimpleTask ? 'simple_report' : 'production',
             createdAt: new Date().toISOString(),
             sourceBatchIds: allSourceBatchIds,
             usedQuantity: 0,
             taskTitle: currentTask?.title || 'Unknown Task',
-            orderNumber: currentOrder?.orderNumber || 'Unknown Order',
-            stageName: currentTask?.title,
-            batchCode: batchCode || 'Без маркування'
+            orderNumber: currentOrder?.orderNumber || 'Simple Task',
+            stageName: isSimpleTask ? 'Загальне' : currentTask?.title,
+            batchCode: isSimpleTask ? '-' : (batchCode || 'Без маркування')
         };
 
         const reportRef = await addDoc(collection(db, "reports"), newReportPayload);
-        console.log("✅ Report saved with ID:", reportRef.id);
 
-        // --- 2. 🎯 БЛОК ОНОВЛЕННЯ ПРОГРЕСУ (Direct ID Priority) ---
-        let taskRef = null;
-
-        // ВАРІАНТ 1: У нас вже є ID (це найнадійніше)
-        if (selectedTaskId) {
-            console.log("🎯 Використовую прямий ID завдання:", selectedTaskId);
-            taskRef = doc(db, 'tasks', selectedTaskId);
-        } 
-        // ВАРІАНТ 2: ID немає, шукаємо вручну (Fallback)
-        else if (currentOrder?.id || currentTask?.orderId) {
-            const targetOrderId = currentOrder?.id || currentTask?.orderId;
-            console.log("🔍 ID немає, шукаю завдання через пошук за OrderID:", targetOrderId);
-            
-            const tasksRef = collection(db, 'tasks');
-            const q = query(tasksRef, where("orderId", "==", targetOrderId));
-            const querySnapshot = await getDocs(q);
-            
-            for (const docSnapshot of querySnapshot.docs) {
-                if (docSnapshot.data().title === currentTask?.title) {
-                    taskRef = doc(db, 'tasks', docSnapshot.id);
-                    console.log("✅ Знайдено завдання через пошук:", docSnapshot.id);
-                    break;
-                }
-            }
-        }
-
-        // 3. Виконуємо оновлення, якщо посилання є
-        if (taskRef) {
+        // --- 2. UPDATE PROGRESS (Only for production) ---
+        if (!isSimpleTask && selectedTaskId) {
+            const taskRef = doc(db, 'tasks', selectedTaskId);
             try {
                 const taskSnap = await getDoc(taskRef);
                 if (taskSnap.exists()) {
-                    // Ми оновлюємо pendingQuantity, бо звіт спочатку має статус 'pending'
-                    // Це покаже помаранчеву смужку прогресу на дошці
                     await updateDoc(taskRef, {
                         pendingQuantity: increment(qtyNumber),
                         updatedAt: serverTimestamp()
                     });
-                    console.log("✅ Прогрес завдання (очікування) оновлено успішно!");
                 }
             } catch (e) {
-                console.error("Помилка при запису в завдання:", e);
+                console.error("Error updating task progress:", e);
             }
         }
 
-        // --- 3. UPDATE ORDER ACTIVITY ---
-        if (currentOrder) {
-            const orderRef = doc(db, 'orders', currentOrder.id);
-            await updateDoc(orderRef, { lastActivity: serverTimestamp() }); 
-        }
-
-        // --- 4. CONSUME MATERIALS ---
-        if (consumptionGroups.length > 0) {
+        // --- 3. CONSUME MATERIALS ---
+        if (!isSimpleTask && consumptionGroups.length > 0) {
             const batchWrite = writeBatch(db);
             for (const group of consumptionGroups) {
                 let remainingToConsume = group.totalNeeded;
@@ -282,21 +258,26 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
             await batchWrite.commit();
         }
 
-        // --- 5. NOTIFICATION ---
+        // --- 4. NOTIFICATION ---
         const workerName = currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'Працівник';
+        const msg = isSimpleTask 
+            ? `Звіт по завданню: ${currentTask?.title} від ${workerName}`
+            : `Новий звіт: ${currentTask?.title} (+${qtyNumber} шт) від ${workerName}`;
+            
         await API.sendNotification(
             'admin',
-            `Новий звіт: ${currentTask?.title || 'Завдання'} (+${qtyNumber} шт) від ${workerName}`,
+            msg,
             'info',
             reportRef.id,
             'admin',
             'Новий звіт'
         );
 
-        alert(`Звіт збережено!\nПрогрес завдання: +${qtyNumber} (Очікує підтвердження).`);
+        alert(isSimpleTask ? "Звіт відправлено на перевірку!" : `Звіт збережено!\nПрогрес завдання: +${qtyNumber} (Очікує підтвердження).`);
 
         // Reset Form
         setIsFormOpen(false);
+        setSelectedTaskId('');
         setQty('');
         setScrap('');
         setNote('');
@@ -304,7 +285,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
         setConsumptionGroups([]);
 
     } catch (e: any) {
-        console.error("🔥 Critical Failure in handleSubmit:", e);
         alert(`Помилка: ${e.message}`);
     } finally {
         setIsSubmitting(false);
@@ -315,8 +295,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
     ? tasks.filter(t => {
         const isAssigned = t.assigneeIds && Array.isArray(t.assigneeIds) ? t.assigneeIds.includes(currentUser.id) : false;
         const isActiveStatus = ['todo', 'in_progress'].includes(t.status);
-        const isProduction = t.type === 'production';
-        return isAssigned && isActiveStatus && isProduction;
+        return isAssigned && isActiveStatus;
     })
     : [];
   
@@ -485,13 +464,17 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                return (
                  <div key={report.id} className="p-4 flex items-center justify-between">
                     <div>
-                       {report.batchCode ? <div className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded w-fit mb-1">{report.batchCode}</div> : orderNum && <div className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded w-fit mb-1">{orderNum}</div>}
+                       {report.batchCode && report.batchCode !== '-' ? <div className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded w-fit mb-1">{report.batchCode}</div> : orderNum && report.orderNumber !== 'Simple Task' && <div className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded w-fit mb-1">{orderNum}</div>}
                        <div className="font-bold text-gray-900">{taskTitle}</div>
                        <div className="text-sm text-gray-500">{new Date(report.createdAt).toLocaleString('uk-UA')}</div>
                        {report.notes && <div className="text-xs text-gray-400 mt-1 italic">"{report.notes}"</div>}
                     </div>
                     <div className="text-right flex items-center gap-4">
-                       <div><span className="block font-bold text-lg text-gray-800">{report.quantity} шт</span>{report.scrapQuantity > 0 && <span className="text-xs text-red-500 font-bold">{report.scrapQuantity} брак</span>}</div>
+                       {report.type !== 'simple_report' ? (
+                          <div><span className="block font-bold text-lg text-gray-800">{report.quantity} шт</span>{report.scrapQuantity > 0 && <span className="text-xs text-red-500 font-bold">{report.scrapQuantity} брак</span>}</div>
+                       ) : (
+                          <div className="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-1 rounded">Просте завд.</div>
+                       )}
                        <div>
                           {report.status === 'approved' && <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold uppercase">Прийнято</span>}
                           {report.status === 'rejected' && <span className="bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-bold uppercase">Відхилено</span>}
@@ -519,114 +502,129 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                         <option value="">-- Активні завдання --</option>
                         {myActiveTasks.map(t => (
                           <option key={t.id} value={t.id}>
-                             {t.title} (Залишилось: {(t.plannedQuantity || 0) - (t.completedQuantity || 0)})
+                             [{t.type === 'simple' ? 'ПРОСТЕ' : 'ВИРОБН.'}] {t.title} 
+                             {t.type === 'production' && ` (Залишилось: ${(t.plannedQuantity || 0) - (t.completedQuantity || 0)})`}
                           </option>
                         ))}
                       </select>
                    </div>
 
-                   <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-1">Номер партії / Зміна</label>
-                      <input 
-                        type="text" 
-                        className="w-full p-3 border rounded-lg bg-white"
-                        value={batchCode}
-                        onChange={e => setBatchCode(e.target.value)}
-                        placeholder="Напр. П-1 або Нічна"
-                      />
-                   </div>
+                   {selectedTaskId && !isSimpleTask && (
+                      <div className="animate-fade-in space-y-4">
+                        <div>
+                            <label className="block text-sm font-bold text-gray-700 mb-1">Номер партії / Зміна</label>
+                            <input 
+                                type="text" 
+                                className="w-full p-3 border rounded-lg bg-white"
+                                value={batchCode}
+                                onChange={e => setBatchCode(e.target.value)}
+                                placeholder="Напр. П-1 або Нічна"
+                            />
+                        </div>
 
-                   <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">Вироблено (шт)</label>
-                        <input 
-                          type="number" 
-                          className="w-full p-3 border rounded-lg"
-                          value={qty}
-                          onChange={e => setQty(e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-bold text-red-600 mb-1">Брак (шт)</label>
-                        <input 
-                          type="number" 
-                          className="w-full p-3 border rounded-lg border-red-100 bg-red-50"
-                          value={scrap}
-                          onChange={e => setScrap(e.target.value)}
-                        />
-                      </div>
-                   </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-1">Вироблено (шт)</label>
+                                <input 
+                                type="number" 
+                                className="w-full p-3 border rounded-lg"
+                                value={qty}
+                                onChange={e => setQty(e.target.value)}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-red-600 mb-1">Брак (шт)</label>
+                                <input 
+                                type="number" 
+                                className="w-full p-3 border rounded-lg border-red-100 bg-red-50"
+                                value={scrap}
+                                onChange={e => setScrap(e.target.value)}
+                                />
+                            </div>
+                        </div>
 
-                   {consumptionGroups.length > 0 && Number(qty) > 0 && (
-                       <div className="space-y-3 animate-fade-in">
-                           {consumptionGroups.map((group, gIdx) => (
-                               <div key={gIdx} className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                                   <div className="flex justify-between items-center mb-2">
-                                       <label className="text-xs font-bold text-blue-800 uppercase flex items-center">
-                                           <Package size={12} className="mr-1"/> Збірка: {group.name}
-                                       </label>
-                                       <span className={`text-xs font-bold ${group.selectedTotal >= group.totalNeeded ? 'text-green-600' : 'text-red-500'}`}>
-                                           Обрано: {group.selectedTotal} / {group.totalNeeded}
-                                       </span>
-                                   </div>
-                                   
-                                   <div className="max-h-24 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
-                                       {group.availableBatches.length === 0 ? (
-                                           <div className="text-xs text-red-500 italic">Немає доступних партій!</div>
-                                       ) : (
-                                           group.availableBatches.map(batch => {
-                                               const available = batch.quantity - (batch.usedQuantity || 0);
-                                               const isSelected = group.selectedBatchIds.has(batch.id);
-                                               const user = allUsers.find(u => u.id === batch.userId);
-                                               
-                                               return (
-                                                   <div 
-                                                       key={batch.id} 
-                                                       onClick={() => toggleBatchSelection(gIdx, batch.id)}
-                                                       className={`p-2 rounded border text-xs cursor-pointer flex justify-between items-center transition-colors ${isSelected ? 'bg-blue-200 border-blue-300' : 'bg-white border-gray-200 hover:bg-blue-50'}`}
-                                                   >
-                                                       <div className="flex items-center">
-                                                           <div className={`w-3 h-3 rounded border mr-2 flex items-center justify-center ${isSelected ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-300'}`}>
-                                                               {isSelected && <CheckSquare size={8} className="text-white"/>}
-                                                           </div>
-                                                           <div>
-                                                               <span className="font-bold text-gray-700">
-                                                                   {batch.type === 'manual_stock' ? 'Склад (Admin)' : user?.lastName || 'Unknown'}
-                                                               </span>
-                                                               <span className="text-gray-400 ml-1">
-                                                                   {new Date(batch.createdAt).toLocaleDateString()}
-                                                               </span>
-                                                           </div>
-                                                       </div>
-                                                       <span className="font-mono font-bold">{available} шт</span>
-                                                   </div>
-                                               );
-                                           })
-                                       )}
-                                   </div>
-                               </div>
-                           ))}
-                       </div>
+                        {consumptionGroups.length > 0 && Number(qty) > 0 && (
+                            <div className="space-y-3 animate-fade-in">
+                                {consumptionGroups.map((group, gIdx) => (
+                                    <div key={gIdx} className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <label className="text-xs font-bold text-blue-800 uppercase flex items-center">
+                                                <Package size={12} className="mr-1"/> Збірка: {group.name}
+                                            </label>
+                                            <span className={`text-xs font-bold ${group.selectedTotal >= group.totalNeeded ? 'text-green-600' : 'text-red-500'}`}>
+                                                Обрано: {group.selectedTotal} / {group.totalNeeded}
+                                            </span>
+                                        </div>
+                                        
+                                        <div className="max-h-24 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                                            {group.availableBatches.length === 0 ? (
+                                                <div className="text-xs text-red-500 italic">Немає доступних партій!</div>
+                                            ) : (
+                                                group.availableBatches.map(batch => {
+                                                    const available = batch.quantity - (batch.usedQuantity || 0);
+                                                    const isSelected = group.selectedBatchIds.has(batch.id);
+                                                    const user = allUsers.find(u => u.id === batch.userId);
+                                                    
+                                                    return (
+                                                        <div 
+                                                            key={batch.id} 
+                                                            onClick={() => toggleBatchSelection(gIdx, batch.id)}
+                                                            className={`p-2 rounded border text-xs cursor-pointer flex justify-between items-center transition-colors ${isSelected ? 'bg-blue-200 border-blue-300' : 'bg-white border-gray-200 hover:bg-blue-50'}`}
+                                                        >
+                                                            <div className="flex items-center">
+                                                                <div className={`w-3 h-3 rounded border mr-2 flex items-center justify-center ${isSelected ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-300'}`}>
+                                                                    {isSelected && <CheckSquare size={8} className="text-white"/>}
+                                                                </div>
+                                                                <div>
+                                                                    <span className="font-bold text-gray-700">
+                                                                        {batch.type === 'manual_stock' ? 'Склад (Admin)' : user?.lastName || 'Unknown'}
+                                                                    </span>
+                                                                    <span className="text-gray-400 ml-1">
+                                                                        {new Date(batch.createdAt).toLocaleDateString()}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                            <span className="font-mono font-bold">{available} шт</span>
+                                                        </div>
+                                                    );
+                                                })
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                      </div>
+                   )}
+
+                   {isSimpleTask && (
+                      <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 flex items-start animate-fade-in">
+                          <ClipboardCheck className="text-blue-600 mr-3 shrink-0" size={24}/>
+                          <div>
+                              <p className="text-sm font-bold text-blue-900">Просте завдання</p>
+                              <p className="text-xs text-blue-700 mt-1">Це завдання не потребує введення кількості. Ви можете просто залишити коментар про виконання.</p>
+                          </div>
+                      </div>
                    )}
 
                    <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-1">Нотатка (опціонально)</label>
+                      <label className="block text-sm font-bold text-gray-700 mb-1">Нотатка / Коментар {isSimpleTask ? '(обов\'язково для пояснення)' : '(опціонально)'}</label>
                       <textarea 
-                        className="w-full p-3 border rounded-lg h-20 resize-none"
-                        placeholder="Коментар..."
+                        className="w-full p-3 border rounded-lg h-24 resize-none outline-none focus:ring-2 focus:ring-slate-500"
+                        placeholder="Опишіть що було зроблено..."
                         value={note}
                         onChange={e => setNote(e.target.value)}
                       />
                    </div>
                 </div>
                 <div className="flex gap-3 mt-6">
-                   <button onClick={() => setIsFormOpen(false)} className="flex-1 py-3 text-gray-500 font-bold hover:bg-gray-100 rounded-lg">Скасувати</button>
+                   <button onClick={() => setIsFormOpen(false)} className="flex-1 py-3 text-gray-500 font-bold hover:bg-gray-100 rounded-lg transition-colors">Скасувати</button>
                    <button 
                      onClick={handleSubmit} 
-                     disabled={isSubmitting}
-                     className="flex-1 py-3 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 disabled:opacity-50 flex justify-center items-center"
+                     disabled={isSubmitting || !selectedTaskId}
+                     className="flex-1 py-3 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 disabled:opacity-50 flex justify-center items-center transition-all shadow-lg"
                    >
-                     {isSubmitting ? <Loader size={16} className="animate-spin"/> : 'Відправити'}
+                     {isSubmitting ? <Loader size={16} className="animate-spin"/> : 'Відправити звіт'}
                    </button>
                 </div>
              </div>
@@ -660,13 +658,19 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-yellow-400 rounded-l-xl"></div>
                    <div className="flex justify-between items-start mb-2 pl-2">
                       <div>
-                         {report.batchCode ? (<div className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded w-fit mb-1">{report.batchCode}</div>) : (orderNum && <div className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded w-fit mb-1">{orderNum}</div>)}
+                         {report.batchCode && report.batchCode !== '-' ? (<div className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded w-fit mb-1">{report.batchCode}</div>) : (orderNum && report.orderNumber !== 'Simple Task' && <div className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded w-fit mb-1">{orderNum}</div>)}
                          <h3 className="font-bold text-gray-900">{taskTitle}</h3>
                          <div className="text-xs text-gray-500 flex items-center mt-1"><span className="font-bold text-gray-700 mr-2">{user?.firstName} {user?.lastName}</span><span>{new Date(report.createdAt).toLocaleTimeString('uk-UA', {hour: '2-digit', minute:'2-digit'})}</span></div>
                       </div>
                       <div className="text-right pr-2"> 
-                         <div className="text-2xl font-bold text-gray-800">{report.quantity} <span className="text-sm font-normal text-gray-400">шт</span></div>
-                         {report.scrapQuantity > 0 && <div className="text-xs font-bold text-red-500">{report.scrapQuantity} брак</div>}
+                         {report.type !== 'simple_report' ? (
+                            <>
+                                <div className="text-2xl font-bold text-gray-800">{report.quantity} <span className="text-sm font-normal text-gray-400">шт</span></div>
+                                {report.scrapQuantity > 0 && <div className="text-xs font-bold text-red-500">{report.scrapQuantity} брак</div>}
+                            </>
+                         ) : (
+                            <div className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded">Просте завдання</div>
+                         )}
                          <button onClick={(e) => handleEditReport(e, report)} className="text-xs text-blue-600 hover:underline mt-1 flex items-center justify-end"><Pencil size={10} className="mr-1"/> Редагувати</button>
                       </div>
                    </div>
@@ -748,14 +752,20 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                              <div className="flex justify-between items-start">
                                 <div className="flex flex-col gap-1">
                                    <div className="text-sm font-bold text-gray-900">{taskTitle}</div>
-                                   {orderNum && (<div className="text-xs text-gray-800"><span className="font-bold text-gray-500">Замовлення:</span> {orderNum}</div>)}
-                                   {report.batchCode && (<div className="text-xs text-gray-800"><span className="font-bold text-gray-500">Партія:</span> {report.batchCode}</div>)}
+                                   {orderNum && report.orderNumber !== 'Simple Task' && (<div className="text-xs text-gray-800"><span className="font-bold text-gray-500">Замовлення:</span> {orderNum}</div>)}
+                                   {report.batchCode && report.batchCode !== '-' && (<div className="text-xs text-gray-800"><span className="font-bold text-gray-500">Партія:</span> {report.batchCode}</div>)}
                                    <div className="text-xs text-gray-500 mt-1 flex items-center">{report.type === 'manual_stock' ? (<span className="text-orange-700 font-bold mr-1">Склад (Manual)</span>) : (<span className="font-medium text-gray-700 mr-1">{user?.firstName} {user?.lastName}</span>)}<span>• {new Date(report.createdAt).toLocaleString('uk-UA')}</span></div>
                                 </div>
                                 <div className="text-right pl-2 shrink-0">
-                                   <div className="font-bold text-gray-900 text-lg">{report.quantity} шт</div>
+                                   {report.type !== 'simple_report' ? (
+                                      <>
+                                          <div className="font-bold text-gray-900 text-lg">{report.quantity} шт</div>
+                                          {report.scrapQuantity > 0 && (<div className="text-xs text-red-600 font-bold mt-1">Брак: {report.scrapQuantity}</div>)}
+                                      </>
+                                   ) : (
+                                      <div className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded">Просте</div>
+                                   )}
                                    <div className={`text-[10px] uppercase font-bold ${report.status === 'approved' ? 'text-green-600' : report.status === 'rejected' ? 'text-red-600' : 'text-yellow-600'}`}>{report.status === 'approved' ? 'Прийнято' : report.status === 'rejected' ? 'Відхилено' : 'Очікує'}</div>
-                                   {report.scrapQuantity > 0 && (<div className="text-xs text-red-600 font-bold mt-1">Брак: {report.scrapQuantity}</div>)}
                                 </div>
                              </div>
                              {report.notes && (<div className="mt-2 text-xs text-gray-500 italic border-l-2 border-gray-200 pl-2 line-clamp-2">"{report.notes}"</div>)}
@@ -776,16 +786,20 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                     <button onClick={() => setIsEditModalOpen(false)}><X size={20} className="text-gray-400"/></button>
                 </div>
                 <div className="space-y-4">
-                   <div className="bg-blue-50 text-xs text-blue-800 p-2 rounded border border-blue-100 flex justify-between items-center"><span>Всього виготовлено (Good + Scrap):</span><span className="font-bold text-lg">{editLockedTotal}</span></div>
-                   <div className="grid grid-cols-2 gap-4">
-                      <div><label className="block text-sm font-bold text-gray-700 mb-1">Придатні (шт)</label><input type="number" className="w-full p-2 border rounded-lg font-bold text-gray-800" value={editQty} onChange={e => handleEditQtyChange(e.target.value)}/></div>
-                      <div><label className="block text-sm font-bold text-red-600 mb-1">Брак (шт)</label><input type="number" className="w-full p-2 border rounded-lg border-red-200 bg-red-50 font-bold text-red-700" value={editScrap} onChange={e => handleEditScrapChange(e.target.value)}/></div>
-                   </div>
+                   {editingReport?.type !== 'simple_report' && (
+                      <>
+                        <div className="bg-blue-50 text-xs text-blue-800 p-2 rounded border border-blue-100 flex justify-between items-center"><span>Всього виготовлено (Good + Scrap):</span><span className="font-bold text-lg">{editLockedTotal}</span></div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div><label className="block text-sm font-bold text-gray-700 mb-1">Придатні (шт)</label><input type="number" className="w-full p-2 border rounded-lg font-bold text-gray-800" value={editQty} onChange={e => handleEditQtyChange(e.target.value)}/></div>
+                            <div><label className="block text-sm font-bold text-red-600 mb-1">Брак (шт)</label><input type="number" className="w-full p-2 border rounded-lg border-red-200 bg-red-50 font-bold text-red-700" value={editScrap} onChange={e => handleEditScrapChange(e.target.value)}/></div>
+                        </div>
+                      </>
+                   )}
                    <div><label className="block text-sm font-bold text-gray-700 mb-1">Нотатка</label><textarea className="w-full p-2 border rounded-lg h-20 resize-none" value={editNote} onChange={e => setEditNote(e.target.value)}/></div>
                 </div>
                 <div className="flex gap-2 mt-6">
-                   <button onClick={() => setIsEditModalOpen(false)} className="flex-1 py-2 text-gray-500 font-bold hover:bg-gray-100 rounded-lg">Скасувати</button>
-                   <button onClick={handleSaveEditedReport} disabled={isSubmitting} className="flex-1 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 flex justify-center items-center">{isSubmitting ? <Loader size={16} className="animate-spin mr-2"/> : <><Save size={16} className="mr-2"/> Зберегти</>}</button>
+                   <button onClick={() => setIsEditModalOpen(false)} className="flex-1 py-2 text-gray-500 font-bold hover:bg-gray-100 rounded-lg transition-colors">Скасувати</button>
+                   <button onClick={handleSaveEditedReport} disabled={isSubmitting} className="flex-1 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 flex justify-center items-center transition-all">{isSubmitting ? <Loader size={16} className="animate-spin mr-2"/> : <><Save size={16} className="mr-2"/> Зберегти</>}</button>
                 </div>
              </div>
           </div>
