@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, AttendanceRecord, WorkSchedule } from '../types';
 import { API } from '../services/api';
@@ -6,7 +7,7 @@ import { AttendanceModal } from '../components/AttendanceModal';
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay } from 'date-fns'; 
 import { uk } from 'date-fns/locale';
-import { ChevronLeft, ChevronRight, Loader, CheckCircle, Clock, XCircle, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader, CheckCircle, Clock, XCircle, Trash2, AlertTriangle } from 'lucide-react';
 
 interface WorkerCalendarProps {
   currentUser: User;
@@ -162,7 +163,6 @@ export const WorkerCalendar: React.FC<WorkerCalendarProps> = ({ currentUser }) =
               const record = recordsMap[dateKey];
               
               let statusLabel = null;
-              let statusColorClass = 'text-gray-300';
               let badge = null;
 
               if (record) {
@@ -175,11 +175,20 @@ export const WorkerCalendar: React.FC<WorkerCalendarProps> = ({ currentUser }) =
                           default: badge = <span className="bg-red-50 text-red-500 px-3 py-1 rounded text-sm font-bold">Відсутність</span>;
                       }
                   } else {
-                      // Work
-                      const hours = (record.workedMinutes || 0) / 60;
+                      // Work Logic for Mobile
+                      const duration = PayrollService.calculateWorkDuration(record);
+                      const hasUnapprovedOvertime = record.verifiedByAdmin && duration > 8 && !record.overtimeApproved;
+
                       statusLabel = (
                           <div className="flex flex-col items-end">
-                             <span className="text-xl font-bold text-gray-800">{formatTime(hours)}</span>
+                             <div className="flex items-center gap-1">
+                                <span className="text-xl font-bold text-gray-900">
+                                  {formatTime(duration)}
+                                </span>
+                                {hasUnapprovedOvertime && (
+                                  <span className="text-yellow-500 text-sm" title="Понаднормові не погоджено">⚠️</span>
+                                )}
+                             </div>
                              {record.verifiedByAdmin ? (
                                 <span className="text-xs text-green-600 font-bold flex items-center"><CheckCircle size={10} className="mr-1"/> Перевірено</span>
                              ) : (
@@ -292,7 +301,8 @@ export const WorkerCalendar: React.FC<WorkerCalendarProps> = ({ currentUser }) =
                     label = 'В обробці';
                     icon = <Clock size={16} className="text-blue-500" />;
                 }
-                if (record.workedMinutes) hours = formatTime(record.workedMinutes / 60);
+                const duration = PayrollService.calculateWorkDuration(record);
+                hours = formatTime(duration);
                 }
             }
 
@@ -332,6 +342,9 @@ export const WorkerCalendar: React.FC<WorkerCalendarProps> = ({ currentUser }) =
                     <div className="w-full">
                     <div className={`text-[10px] font-bold uppercase tracking-wide opacity-80 text-left ${textClass}`}>
                         {label}
+                        {record && record.type === 'work' && record.verifiedByAdmin && PayrollService.calculateWorkDuration(record) > 8 && !record.overtimeApproved && (
+                           <span className="text-yellow-500 ml-1">⚠️</span>
+                        )}
                     </div>
                     {hours && (
                         <div className={`text-xs font-mono mt-1 text-left opacity-100 ${textClass}`}>
