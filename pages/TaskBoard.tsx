@@ -1,5 +1,3 @@
-
-// ... existing imports ...
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Task, TaskType, Order, User, JobCycle, SetupMap, TaskStatus, Tool } from '../types';
 import { API } from '../services/api';
@@ -529,9 +527,17 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
       try {
         await API.updateTaskStatus(draggedTaskId, newStatus);
         
+        // --- ПЕРЕКЛАД СТАТУСІВ ТА СПОВІЩЕННЯ (УКРАЇНСЬКА) ---
+        const statusNames: Record<string, string> = {
+          'todo': 'ЗРОБИТИ',
+          'in_progress': 'В РОБОТІ',
+          'done': 'ГОТОВО',
+          'archived': 'АРХІВ'
+        };
+
         await API.sendNotification(
             'admin',
-            `Статус змінено: ${task.title} -> ${newStatus.toUpperCase()}`,
+            `Статус змінено: ${task.title} → ${statusNames[newStatus] || newStatus}`,
             'warning',
             undefined,
             'admin',
@@ -1036,18 +1042,19 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                             <div className="flex flex-wrap gap-2">
                                 {users.length === 0 && <span className="text-xs text-gray-400 italic">Завантаження працівників...</span>}
                                 {users.map(user => {
-                                const isSelected = assigneeIds.includes(user.id);
-                                return (
-                                    <button 
-                                    key={user.id}
-                                    onClick={() => toggleAssignee(user.id)}
-                                    className={`flex items-center px-3 py-1.5 rounded-full border text-sm font-medium transition-all ${isSelected ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}
-                                    >
-                                    <img src={user.avatar || `https://ui-avatars.com/api/?name=${user.firstName}+${user.lastName}`} className="w-5 h-5 rounded-full mr-2 border border-white"/>
-                                    {user.firstName} {user.lastName}
-                                    {isSelected && <CheckCircle size={12} className="ml-2"/>}
-                                    </button>
-                                );
+                                    // isSelected defined correctly
+                                    const isSelected = assigneeIds.includes(user.id);
+                                    return (
+                                        <button 
+                                            key={user.id}
+                                            onClick={() => toggleAssignee(user.id)}
+                                            className={`flex items-center px-3 py-1.5 rounded-full border text-sm font-medium transition-all ${isSelected ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}
+                                        >
+                                            <img src={user.avatar || `https://ui-avatars.com/api/?name=${user.firstName}+${user.lastName}`} className="w-5 h-5 rounded-full mr-2 border border-white"/>
+                                            {user.firstName} {user.lastName}
+                                            {isSelected && <CheckCircle size={12} className="ml-2"/>}
+                                        </button>
+                                    );
                                 })}
                             </div>
                         </div>
