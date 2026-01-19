@@ -21,6 +21,7 @@ export interface User {
   password?: string; // Optional for auth (handled by Firebase Auth mostly or custom doc)
   role: Role;
   isActive?: boolean; // Added for filtering
+  status?: 'active' | 'dismissed'; // Employment status
   avatar?: string;
   phone?: string;
   dob?: string;
@@ -108,6 +109,7 @@ export interface AttendanceRecord {
   transportCost?: number;
   totalExpenses?: number;
   updatedAt?: string;
+  requiresAdminApproval?: boolean;
 }
 
 // --- PRODUCTION SYSTEM TYPES ---
@@ -374,7 +376,7 @@ export interface ProductionReport {
   productName?: string;
   
   // NEW: Batch Tracking
-  batchCode?: string; // Specific batch code (e.g., "Shift-1", "A-123")
+  batchCode?: string; // Specific batch code (e.g. "Shift-1", "A-123")
 }
 
 // --- NOTIFICATIONS ---

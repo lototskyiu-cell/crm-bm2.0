@@ -49,8 +49,9 @@ export const AdminAttendance: React.FC = () => {
         API.getAttendanceRecords(undefined, selectedMonth),
         API.getSchedules()
       ]);
-      // Safety check for array existence
-      setUsers((usersData || []).filter(u => u.role === 'worker'));
+      // Filter out non-workers and DISMISSED workers
+      const activeWorkers = (usersData || []).filter(u => u.role === 'worker' && u.status !== 'dismissed');
+      setUsers(activeWorkers);
       setRecords(recordsData || []);
       setSchedules(schedulesData || []);
     } catch (e) {

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, WorkSchedule, RoleConfig } from '../types';
 import { API } from '../services/api';
 import { uploadFileToCloudinary } from '../services/cloudinary';
-import { Plus, Edit2, X, Camera, Calendar, Loader, Shield } from 'lucide-react';
+import { Plus, Edit2, X, Camera, Calendar, Loader, Shield, UserX, CheckCircle } from 'lucide-react';
 
 export const AdminWorkers: React.FC = () => {
   const [workers, setWorkers] = useState<User[]>([]);
@@ -50,14 +50,18 @@ export const AdminWorkers: React.FC = () => {
     
     if (user) {
       setEditingUser(user);
-      setFormData({ ...user });
+      setFormData({ 
+          ...user,
+          status: user.status || 'active'
+      });
       setPhotoPreview(user.avatar || null);
     } else {
       setEditingUser(null);
       setFormData({
         role: 'worker',
         allowManualLogin: false,
-        skills: []
+        skills: [],
+        status: 'active'
       });
       setPhotoPreview(null);
     }
@@ -134,9 +138,10 @@ export const AdminWorkers: React.FC = () => {
           // Find friendly role name
           const roleName = availableRoles.find(r => r.id === worker.role)?.name || 
                            (worker.role === 'admin' ? 'Адміністратор' : worker.role === 'worker' ? 'Працівник' : worker.role);
+          const isDismissed = worker.status === 'dismissed';
 
           return (
-            <div key={worker.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col hover:shadow-md transition-shadow">
+            <div key={worker.id} className={`bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col hover:shadow-md transition-shadow ${isDismissed ? 'opacity-60 bg-gray-50' : ''}`}>
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center">
                   <img 
@@ -148,10 +153,15 @@ export const AdminWorkers: React.FC = () => {
                     <h3 className="font-bold text-gray-900">{worker.firstName} {worker.lastName}</h3>
                     <div className="flex flex-col">
                         <span className="text-sm text-gray-500">{worker.position || 'Без посади'}</span>
-                        <div className="flex items-center mt-1">
+                        <div className="flex items-center mt-1 gap-1">
                             <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${worker.role === 'admin' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
                                 {roleName}
                             </span>
+                            {isDismissed && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase bg-gray-200 text-gray-600 border border-gray-300">
+                                    Звільнено
+                                </span>
+                            )}
                         </div>
                     </div>
                   </div>
@@ -283,6 +293,20 @@ export const AdminWorkers: React.FC = () => {
 
               {/* Right Column */}
               <div className="space-y-4">
+                
+                {/* STATUS SELECTOR */}
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Статус працівника</label>
+                    <select
+                        value={formData.status || 'active'}
+                        onChange={e => setFormData({...formData, status: e.target.value as 'active' | 'dismissed'})}
+                        className={`w-full p-2 border rounded-md font-bold ${formData.status === 'active' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}
+                    >
+                        <option value="active">🟢 Працює (Активний)</option>
+                        <option value="dismissed">🔴 Звільнено (Архів)</option>
+                    </select>
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Логін</label>
                   <input 

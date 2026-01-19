@@ -1,12 +1,12 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { AttendanceRecord, AbsenceType, TransportMode, Break, User, WorkSchedule, AdditionalExpense } from '../types';
 import { API } from '../services/api';
 import { DEFAULT_BREAKS } from '../services/mockStore'; 
 import { PayrollService } from '../services/payroll';
 import { AttendanceLogic } from '../services/attendanceLogic';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
-import { X, Save, Clock, Bus, Car, Plus, Trash2, CheckCircle, Calendar, AlertTriangle, Info, Settings, Moon, Sun, ShoppingBag } from 'lucide-react';
+import { X, Save, Clock, Bus, Car, Plus, Trash2, Calendar, Settings, ChevronDown, AlertTriangle } from 'lucide-react';
 
 interface AttendanceModalProps {
   date: string;
@@ -181,16 +181,60 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
   const handleSave = async () => {
     if (!user) return;
 
-    const record: AttendanceRecord = {
+    // --- 1. BUSINESS LOGIC VALIDATION ---
+    let detectedType = 'ok';
+    let violationFlag = false;
+
+    if (activeTab === 'absence') {
+        detectedType = absenceType;
+        violationFlag = true; // Any absence is noteworthy
+    } else {
+        // Compare Plan vs Fact
+        const schedule = schedules.find(s => s.id === selectedScheduleId);
+        if (schedule && schedule.startTime && schedule.endTime && startTime && endTime) {
+            const timeToMin = (t: string) => {
+                const [h, m] = t.split(':').map(Number);
+                return h * 60 + m;
+            };
+
+            const planStart = timeToMin(schedule.startTime);
+            const planEnd = timeToMin(schedule.endTime);
+            const factStart = timeToMin(startTime);
+            const factEnd = timeToMin(endTime);
+
+            const lateMins = factStart - planStart;
+            const earlyLeaveMins = planEnd - factEnd;
+            // Abs diff of durations
+            const planDuration = planEnd - planStart;
+            const factDuration = factEnd - factStart;
+            const totalDiff = Math.abs(planDuration - factDuration);
+
+            if (totalDiff > 180) { // > 3 hours difference
+                detectedType = 'major_deviation';
+                violationFlag = true;
+            } else if (lateMins > 30) {
+                detectedType = 'late';
+                violationFlag = true;
+            } else if (earlyLeaveMins > 15) {
+                detectedType = 'early_leave';
+                violationFlag = true;
+            }
+        }
+    }
+
+    // --- 2. RECORD CONSTRUCTION ---
+    const record: any = { // Using any to inject dynamic flags
       id: existingId || `rec_${Date.now()}`,
       userId,
       date,
       type: activeTab,
-      verifiedByAdmin: isAdmin ? verifiedByAdmin : false,
+      verifiedByAdmin: isAdmin ? verifiedByAdmin : false, // Worker edit resets verification usually
       overtimeApproved: isAdmin ? overtimeApproved : (overtimeApproved && verifiedByAdmin),
-      workScheduleId: activeTab === 'work' ? selectedScheduleId : undefined
+      workScheduleId: activeTab === 'work' ? selectedScheduleId : undefined,
+      requiresAdminApproval: violationFlag // Flag for admin dashboard
     };
     
+    // Explicit reset if not admin
     if (!isAdmin) {
        record.verifiedByAdmin = false; 
        record.overtimeApproved = false; 
@@ -216,6 +260,38 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
     } else {
       record.absenceType = absenceType;
       record.comment = comment;
+    }
+
+    // --- 3. NOTIFICATIONS (UKRAINIAN) ---
+    const statusTextMap: Record<string, string> = {
+      'sick': 'Лікарняне',
+      'vacation': 'Відпустка',
+      'unpaid': 'За власний рахунок',
+      'truancy': 'Прогул',
+      'late': 'Запізнення',
+      'early_leave': 'Ранній вихід',
+      'major_deviation': 'Невідповідність графіку',
+      'ok': 'Зміна закрита'
+    };
+
+    // Only send notification if violation exists AND user is NOT admin (admins don't notify themselves)
+    if (violationFlag && !isAdmin) {
+        const workerName = `${user.firstName} ${user.lastName}`;
+        const statusText = statusTextMap[detectedType] || 'Інше';
+        const title = activeTab === 'absence' ? 'Відсутність працівника' : 'Увага: Порушення графіку';
+        
+        try {
+            await API.sendNotification(
+                'admin', // Target global admin group
+                `Працівник ${workerName}. Статус: ${statusText}. ${comment ? '('+comment+')' : ''}`,
+                'alert',
+                record.id,
+                'admin',
+                title
+            );
+        } catch (err) {
+            console.error("Failed to send notification", err);
+        }
     }
 
     try {
@@ -244,14 +320,48 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
     }
   };
 
+  // Live Stats Calculation
+  const liveStats = useMemo(() => {
+    if (!user) return { hours: 0, salary: 0, expenses: 0, overtime: 0 };
+    
+    // Construct temp record to use PayrollService calculation
+    const temp: AttendanceRecord = {
+        id: 'temp',
+        userId,
+        date,
+        type: activeTab,
+        startTime,
+        endTime,
+        breaks,
+        transportMode,
+        distanceTo,
+        distanceFrom,
+        fuelConsumption,
+        fuelPrice,
+        busPriceTo,
+        busPriceFrom,
+        additionalExpenses,
+        workScheduleId: selectedScheduleId,
+        overtimeApproved: overtimeApproved // IMPORTANT for salary calc
+    };
+
+    const hours = PayrollService.calculateWorkDuration(temp);
+    const { overtimeHours } = PayrollService.calculateOvertime(temp, user, schedules);
+    const salary = PayrollService.calculateDailySalary(temp, user, schedules);
+    const transport = PayrollService.calculateTransportCost(temp);
+    const extra = PayrollService.calculateAdditionalExpensesCost(temp);
+
+    return { hours, salary, expenses: transport + extra, overtime: overtimeHours };
+  }, [user, activeTab, startTime, endTime, breaks, transportMode, distanceTo, distanceFrom, fuelConsumption, fuelPrice, busPriceTo, busPriceFrom, additionalExpenses, selectedScheduleId, overtimeApproved, schedules]);
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-[95%] md:w-full md:max-w-md flex flex-col my-auto max-h-[90vh] overflow-hidden m-4 md:m-0">
+      <div className="bg-white rounded-2xl shadow-2xl w-[95%] md:w-full md:max-w-md flex flex-col my-auto max-h-[95vh] overflow-hidden m-4 md:m-0">
         
-        {/* Header */}
-        <div className="bg-slate-50 px-6 py-4 border-b border-gray-100 flex justify-between items-center shrink-0">
+        {/* Header Title Bar */}
+        <div className="bg-white px-6 py-4 border-b border-gray-100 flex justify-between items-center shrink-0">
           <div>
             <h3 className="text-lg font-bold text-slate-900">
               {new Date(date).toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })}
@@ -261,158 +371,269 @@ export const AttendanceModal: React.FC<AttendanceModalProps> = ({
               {isAdmin && <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold uppercase text-[10px]">Admin</span>}
             </div>
           </div>
-          <button onClick={onClose} className="p-2 bg-white rounded-full text-gray-400 hover:text-gray-600 shadow-sm border border-gray-100 hover:scale-105 transition-all">
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex bg-gray-100/50 p-1 mx-6 mt-4 rounded-xl shrink-0">
-          <button 
-            className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeTab === 'work' ? 'bg-white text-slate-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-            onClick={() => setActiveTab('work')}
-          >
-            Записати роботу
-          </button>
-          <button 
-            className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-all ${activeTab === 'absence' ? 'bg-white text-slate-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-            onClick={() => setActiveTab('absence')}
-          >
-            Відсутність
-          </button>
+          <div className="flex gap-2">
+             {existingId && <button onClick={handleDelete} className="p-2 text-red-400 hover:text-red-600"><Trash2 size={20}/></button>}
+             <button onClick={onClose} className="p-2 bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 shadow-sm hover:scale-105 transition-all">
+                <X size={20} />
+             </button>
+          </div>
         </div>
 
         {/* Content */}
-        <div className="p-6 overflow-y-auto space-y-6 flex-1">
-          {activeTab === 'work' ? (
-             <div className="space-y-6 animate-fade-in">
-               {/* Time & Schedule */}
-               <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Початок</label>
-                    <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} className="w-full p-2.5 border rounded-lg bg-gray-50"/>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Кінець</label>
-                    <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} className="w-full p-2.5 border rounded-lg bg-gray-50"/>
-                  </div>
-               </div>
-               
-               {/* Transport Mode */}
-               <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Транспорт</label>
-                  <div className="flex bg-gray-100 p-1 rounded-lg">
-                     <button onClick={() => setTransportMode('car')} className={`flex-1 py-2 text-xs font-bold rounded flex items-center justify-center ${transportMode === 'car' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}><Car size={14} className="mr-1"/> Авто</button>
-                     <button onClick={() => setTransportMode('bus')} className={`flex-1 py-2 text-xs font-bold rounded flex items-center justify-center ${transportMode === 'bus' ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500'}`}><Bus size={14} className="mr-1"/> Громадський</button>
-                  </div>
-               </div>
+        <div className="p-6 overflow-y-auto flex-1 bg-white">
+            
+            {/* TABS SWITCHER */}
+            <div className="flex bg-gray-100 p-1 rounded-xl mb-6">
+                <button 
+                    onClick={() => setActiveTab('work')}
+                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all uppercase tracking-wide flex items-center justify-center ${activeTab === 'work' ? 'bg-white text-slate-900 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                >
+                    Робота
+                </button>
+                <button 
+                    onClick={() => setActiveTab('absence')}
+                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all uppercase tracking-wide flex items-center justify-center ${activeTab === 'absence' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                >
+                    Відсутність
+                </button>
+            </div>
 
-               {transportMode === 'car' ? (
-                 <div className="space-y-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
-                    <div className="grid grid-cols-2 gap-4">
-                       <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Км (Туди)</label><input type="number" value={distanceTo} onChange={e => setDistanceTo(Number(e.target.value))} className="w-full p-2 border rounded font-bold"/></div>
-                       <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Км (Назад)</label><input type="number" value={distanceFrom} onChange={e => setDistanceFrom(Number(e.target.value))} className="w-full p-2 border rounded font-bold"/></div>
+            {/* 1. HEADER STATS (Grid 4 Uniform Blocks) */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
+                {/* Block 1: Work */}
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                    <div className="text-xs text-gray-500 font-bold uppercase mb-1">РОБОТА</div>
+                    <div className="text-3xl font-bold text-gray-800">
+                        {activeTab === 'work' ? liveStats.hours : 0} <span className="text-sm font-normal text-gray-400">год</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                       <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Витрата (л/100)</label><input type="number" value={fuelConsumption} onChange={e => setFuelConsumption(Number(e.target.value))} className="w-full p-2 border rounded"/></div>
-                       <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Ціна (грн/л)</label><input type="number" value={fuelPrice} onChange={e => setFuelPrice(Number(e.target.value))} className="w-full p-2 border rounded"/></div>
-                    </div>
-                 </div>
-               ) : (
-                 <div className="space-y-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
-                    <div className="grid grid-cols-2 gap-4">
-                       <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Квиток (Туди)</label><input type="number" value={busPriceTo} onChange={e => setBusPriceTo(Number(e.target.value))} className="w-full p-2 border rounded font-bold"/></div>
-                       <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Квиток (Назад)</label><input type="number" value={busPriceFrom} onChange={e => setBusPriceFrom(Number(e.target.value))} className="w-full p-2 border rounded font-bold"/></div>
-                    </div>
-                 </div>
-               )}
-
-               {/* Breaks */}
-               <div>
-                  <div className="flex justify-between items-center mb-2">
-                     <label className="block text-xs font-bold text-gray-500 uppercase">Перерви</label>
-                     <button onClick={handleAddBreak} className="text-xs text-blue-600 font-bold hover:underline flex items-center"><Plus size={12} className="mr-1"/> Додати</button>
-                  </div>
-                  <div className="space-y-2">
-                     {breaks.map((b, i) => (
-                        <div key={b.id || i} className="flex gap-2 items-center">
-                           <input value={b.name} onChange={e => {const n = [...breaks]; n[i].name = e.target.value; setBreaks(n)}} className="flex-1 p-2 border rounded text-sm"/>
-                           <input type="number" value={b.durationMinutes} onChange={e => {const n = [...breaks]; n[i].durationMinutes = Number(e.target.value); setBreaks(n)}} className="w-16 p-2 border rounded text-sm text-center"/>
-                           <span className="text-xs text-gray-400">хв</span>
-                           <button onClick={() => handleRemoveBreak(i)} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
-                        </div>
-                     ))}
-                  </div>
-               </div>
-
-               {/* Additional Expenses */}
-               <div>
-                  <div className="flex justify-between items-center mb-2">
-                     <label className="block text-xs font-bold text-gray-500 uppercase">Додаткові витрати</label>
-                  </div>
-                  <div className="space-y-2 mb-2">
-                     {additionalExpenses.map(exp => (
-                        <div key={exp.id} className="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-100 text-sm">
-                           <span>{exp.name}</span>
-                           <div className="flex items-center gap-3">
-                              {exp.extraDistance > 0 && <span className="text-xs text-gray-500">{exp.extraDistance} км</span>}
-                              <span className="font-bold">{exp.amount} ₴</span>
-                              <button onClick={() => handleRemoveExpense(exp.id)} className="text-red-400 hover:text-red-600"><Trash2 size={14}/></button>
-                           </div>
-                        </div>
-                     ))}
-                  </div>
-                  <div className="flex gap-2 items-end bg-gray-50 p-2 rounded border border-gray-200">
-                     <div className="flex-1"><label className="text-[9px] uppercase text-gray-400 font-bold">Назва</label><input value={newExpName} onChange={e => setNewExpName(e.target.value)} className="w-full p-1 border rounded text-sm"/></div>
-                     <div className="w-16"><label className="text-[9px] uppercase text-gray-400 font-bold">Сума</label><input type="number" value={newExpAmount} onChange={e => setNewExpAmount(e.target.value)} className="w-full p-1 border rounded text-sm"/></div>
-                     <button onClick={handleAddExpense} disabled={!newExpName} className="bg-blue-600 text-white p-1.5 rounded hover:bg-blue-700 disabled:opacity-50"><Plus size={16}/></button>
-                  </div>
-               </div>
-
-               {/* Admin Controls */}
-               {isAdmin && (
-                  <div className="border-t pt-4 mt-4">
-                     <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Адміністрування</label>
-                     <div className="flex gap-4">
-                        <label className="flex items-center space-x-2 cursor-pointer bg-green-50 px-3 py-2 rounded border border-green-100">
-                           <input type="checkbox" checked={verifiedByAdmin} onChange={e => setVerifiedByAdmin(e.target.checked)} className="text-green-600 focus:ring-green-500 rounded"/>
-                           <span className="text-sm font-medium text-green-800">Перевірено</span>
-                        </label>
-                        <label className="flex items-center space-x-2 cursor-pointer bg-yellow-50 px-3 py-2 rounded border border-yellow-100">
-                           <input type="checkbox" checked={overtimeApproved} onChange={e => setOvertimeApproved(e.target.checked)} className="text-yellow-600 focus:ring-yellow-500 rounded"/>
-                           <span className="text-sm font-medium text-yellow-800">Овертайм ОК</span>
-                        </label>
-                     </div>
-                  </div>
-               )}
-             </div>
-          ) : (
-             <div className="space-y-6 animate-fade-in">
-                <div>
-                   <label className="block text-sm font-bold text-gray-700 mb-2">Тип відсутності</label>
-                   <select value={absenceType} onChange={e => setAbsenceType(e.target.value as any)} className="w-full p-3 border rounded-lg bg-white">
-                      <option value="sick">Лікарняний</option>
-                      <option value="vacation">Відпустка</option>
-                      <option value="unpaid">За свій рахунок</option>
-                      <option value="truancy">Прогул</option>
-                   </select>
                 </div>
-                <div>
-                   <label className="block text-sm font-bold text-gray-700 mb-2">Коментар</label>
-                   <textarea value={comment} onChange={e => setComment(e.target.value)} className="w-full p-3 border rounded-lg h-32 resize-none" placeholder="Причина відсутності..."/>
+
+                {/* Block 2: Overtime / Absence */}
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                    <div className="text-xs text-gray-500 font-bold uppercase mb-1">
+                        {activeTab === 'work' ? 'ПОНАДНОРМОВІ' : 'ВІДСУТНІСТЬ'}
+                    </div>
+                    <div className={`text-3xl font-bold ${activeTab === 'work' && liveStats.overtime > 0 ? 'text-orange-500' : 'text-gray-400'}`}>
+                        {activeTab === 'work' ? (
+                            liveStats.overtime > 0 ? `+${liveStats.overtime}` : '0'
+                        ) : (
+                            '0' 
+                        )}
+                        <span className="text-sm font-normal text-gray-400 ml-1">год</span>
+                    </div>
                 </div>
-             </div>
-          )}
+
+                {/* Block 3: Salary */}
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                    <div className="text-xs text-green-600 font-bold uppercase mb-1">ЗАРПЛАТА</div>
+                    <div className="text-3xl font-bold text-green-600">{liveStats.salary} ₴</div>
+                </div>
+
+                {/* Block 4: Expenses */}
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                    <div className="text-xs text-gray-500 font-bold uppercase mb-1">КОМПЕНСАЦІЯ</div>
+                    <div className="text-3xl font-bold text-gray-800">{liveStats.expenses} ₴</div>
+                </div>
+            </div>
+
+            {/* OVERTIME APPROVAL CHECKBOX (ADMIN ONLY) */}
+            {activeTab === 'work' && liveStats.overtime > 0 && isAdmin && (
+                <div className="flex items-center mb-6 bg-orange-50 p-3 rounded-xl border border-orange-200 animate-fade-in">
+                    <input
+                        type="checkbox"
+                        id="approveOvertime"
+                        checked={overtimeApproved}
+                        onChange={(e) => setOvertimeApproved(e.target.checked)}
+                        className="w-5 h-5 text-orange-600 rounded border-orange-300 focus:ring-orange-500 cursor-pointer"
+                    />
+                    <label htmlFor="approveOvertime" className="ml-3 text-sm font-bold text-orange-800 cursor-pointer select-none">
+                        Погодити оплату понаднормових (+{liveStats.overtime} год)
+                    </label>
+                </div>
+            )}
+
+            {/* 2. SCHEDULE BLOCK */}
+            <div className="bg-blue-50 p-4 rounded-lg mb-6 flex justify-between items-center border border-blue-100">
+                <div className="flex items-center">
+                    <div className="bg-white p-2 rounded-lg text-blue-600 mr-3 shadow-sm">
+                        <Calendar size={20} />
+                    </div>
+                    <div>
+                        <div className="text-[10px] font-bold text-blue-400 uppercase tracking-wider mb-0.5">ГРАФІК РОБОТИ</div>
+                        <div className="relative">
+                            <select 
+                                value={selectedScheduleId}
+                                onChange={(e) => handleScheduleChange(e.target.value)}
+                                disabled={!isAdmin}
+                                className={`appearance-none bg-transparent font-bold text-blue-900 text-lg outline-none pr-4 w-full ${!isAdmin ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
+                            >
+                                {schedules.map(s => <option key={s.id} value={s.id}>{s.name} ({s.shiftDurationHours}г)</option>)}
+                                {!schedules.length && <option value="">Без графіку</option>}
+                            </select>
+                            <ChevronDown size={14} className="absolute right-0 top-1/2 -translate-y-1/2 text-blue-900 pointer-events-none" />
+                        </div>
+                    </div>
+                </div>
+                <button className="text-blue-400 hover:text-blue-600 transition-colors">
+                    <Settings size={20} />
+                </button>
+            </div>
+
+            {/* 3. INPUTS (CONDITIONAL) */}
+            {activeTab === 'work' ? (
+                <>
+                    <div className="grid grid-cols-2 gap-4 mb-6">
+                        <div>
+                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">ПОЧАТОК</label>
+                            <input 
+                                type="time" 
+                                value={startTime} 
+                                onChange={e => setStartTime(e.target.value)}
+                                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-800 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-gray-400 uppercase mb-1">КІНЕЦЬ</label>
+                            <input 
+                                type="time" 
+                                value={endTime} 
+                                onChange={e => setEndTime(e.target.value)}
+                                className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-800 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                            />
+                        </div>
+                    </div>
+
+                    {/* 4. TRANSPORT */}
+                    <div className="mb-6">
+                        <div className="flex bg-gray-100 p-1 rounded-xl mb-4">
+                            <button 
+                                onClick={() => setTransportMode('car')}
+                                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all flex items-center justify-center ${transportMode === 'car' ? 'bg-white shadow-sm text-slate-900' : 'text-gray-500'}`}
+                            >
+                                <Car size={16} className="mr-2"/> Авто
+                            </button>
+                            <button 
+                                onClick={() => setTransportMode('bus')}
+                                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all flex items-center justify-center ${transportMode === 'bus' ? 'bg-white shadow-sm text-slate-900' : 'text-gray-500'}`}
+                            >
+                                <Bus size={16} className="mr-2"/> Автобус
+                            </button>
+                        </div>
+                        
+                        {transportMode === 'car' ? (
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Км (Всього)</label>
+                                    <div className="flex gap-2">
+                                        <input type="number" placeholder="Туди" value={distanceTo} onChange={e => setDistanceTo(Number(e.target.value))} className="w-full p-2 border rounded-lg text-sm bg-gray-50"/>
+                                        <input type="number" placeholder="Назад" value={distanceFrom} onChange={e => setDistanceFrom(Number(e.target.value))} className="w-full p-2 border rounded-lg text-sm bg-gray-50"/>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Паливо (Л / Ціна)</label>
+                                    <div className="flex gap-2">
+                                        <input type="number" placeholder="Л" value={fuelConsumption} onChange={e => setFuelConsumption(Number(e.target.value))} className="w-full p-2 border rounded-lg text-sm bg-gray-50"/>
+                                        <input type="number" placeholder="Грн" value={fuelPrice} onChange={e => setFuelPrice(Number(e.target.value))} className="w-full p-2 border rounded-lg text-sm bg-gray-50"/>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Квиток Туди</label><input type="number" value={busPriceTo} onChange={e => setBusPriceTo(Number(e.target.value))} className="w-full p-2 border rounded-lg text-sm bg-gray-50"/></div>
+                                <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Квиток Назад</label><input type="number" value={busPriceFrom} onChange={e => setBusPriceFrom(Number(e.target.value))} className="w-full p-2 border rounded-lg text-sm bg-gray-50"/></div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* 5. BREAKS UI */}
+                    <div className="mb-6">
+                        <div className="flex justify-between items-center mb-3">
+                            <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider">ПЕРЕРВИ</h4>
+                            <button onClick={handleAddBreak} className="w-6 h-6 bg-slate-900 text-white rounded-full flex items-center justify-center hover:bg-slate-700 transition-colors"><Plus size={14}/></button>
+                        </div>
+                        <div className="space-y-2">
+                            {breaks.map((b, i) => (
+                                <div key={i} className="flex items-center justify-between bg-white border border-gray-200 p-3 rounded-xl shadow-sm">
+                                    <div className="flex items-center">
+                                        <input 
+                                            value={b.name} 
+                                            onChange={e => {const n = [...breaks]; n[i].name = e.target.value; setBreaks(n)}}
+                                            className="font-medium text-gray-900 text-sm bg-transparent outline-none w-32"
+                                        />
+                                        {/* Badge Logic: isPaid green, !isPaid red */}
+                                        {b.isPaid ? (
+                                            <span className="bg-green-100 text-green-800 text-xs font-medium mr-2 px-2.5 py-0.5 rounded">PAID</span>
+                                        ) : (
+                                            <span className="bg-red-100 text-red-800 text-xs font-medium mr-2 px-2.5 py-0.5 rounded">UNPAID</span>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center">
+                                        <input 
+                                            type="number" 
+                                            value={b.durationMinutes} 
+                                            onChange={e => {const n = [...breaks]; n[i].durationMinutes = Number(e.target.value); setBreaks(n)}}
+                                            className="w-12 text-right font-bold text-gray-700 text-sm bg-transparent outline-none mr-1"
+                                        />
+                                        <span className="text-xs text-gray-400 mr-3">хв</span>
+                                        <button onClick={() => handleRemoveBreak(i)} className="text-gray-400 hover:text-red-500"><Trash2 size={16}/></button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    
+                    {/* Additional Expenses */}
+                    {additionalExpenses.length > 0 && (
+                        <div className="mb-6">
+                            <div className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-2">ДОДАТКОВІ ВИТРАТИ</div>
+                            {additionalExpenses.map(exp => (
+                                <div key={exp.id} className="flex justify-between items-center bg-gray-50 p-2 rounded-lg mb-1 border border-gray-100">
+                                    <span className="text-sm font-medium text-gray-700">{exp.name}</span>
+                                    <div className="flex items-center">
+                                        <span className="font-bold text-gray-900 mr-3">{exp.amount} ₴</span>
+                                        <button onClick={() => handleRemoveExpense(exp.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={14}/></button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    
+                    <div className="flex gap-2 items-center">
+                        <input placeholder="Нова витрата" value={newExpName} onChange={e => setNewExpName(e.target.value)} className="flex-1 p-2 border rounded-lg text-sm bg-gray-50"/>
+                        <input type="number" placeholder="Сума" value={newExpAmount} onChange={e => setNewExpAmount(e.target.value)} className="w-20 p-2 border rounded-lg text-sm bg-gray-50"/>
+                        <button onClick={handleAddExpense} className="p-2 bg-slate-100 rounded-lg text-slate-600 hover:bg-slate-200"><Plus size={16}/></button>
+                    </div>
+                </>
+            ) : (
+                <div className="space-y-4">
+                   <div>
+                       <label className="block text-sm font-bold text-gray-700 mb-2">Тип відсутності</label>
+                       <select value={absenceType} onChange={e => setAbsenceType(e.target.value as any)} className="w-full p-3 border rounded-xl bg-white font-bold text-gray-800">
+                           <option value="sick">Лікарняний</option>
+                           <option value="vacation">Відпустка</option>
+                           <option value="unpaid">За свій рахунок</option>
+                           <option value="truancy">Прогул</option>
+                       </select>
+                   </div>
+                   <div>
+                       <label className="block text-sm font-bold text-gray-700 mb-2">Коментар</label>
+                       <textarea value={comment} onChange={e => setComment(e.target.value)} className="w-full p-3 border rounded-xl h-32 resize-none focus:outline-none focus:border-blue-500" placeholder="Причина відсутності..."/>
+                   </div>
+                </div>
+            )}
         </div>
 
-        {/* Footer */}
-        <div className="p-6 border-t border-gray-100 bg-gray-50 rounded-b-2xl flex justify-between items-center shrink-0">
-           {existingId ? (
-              <button onClick={handleDelete} className="text-red-500 hover:text-red-700 p-2 rounded hover:bg-red-50 transition-colors" title="Видалити запис"><Trash2 size={20}/></button>
-           ) : (<div></div>)}
-           <button onClick={handleSave} className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-slate-800 transition-colors flex items-center">
-              <Save size={18} className="mr-2"/> Зберегти
-           </button>
+        {/* 6. FOOTER */}
+        <div className="p-4 border-t border-gray-100 bg-white rounded-b-2xl">
+            {isAdmin && (
+                <label className="flex items-center mb-4 cursor-pointer">
+                    <input type="checkbox" checked={verifiedByAdmin} onChange={e => setVerifiedByAdmin(e.target.checked)} className="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500"/>
+                    <span className="ml-2 text-sm font-medium text-gray-700">Запис перевірено адміністратором</span>
+                </label>
+            )}
+            <button onClick={handleSave} className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl hover:bg-slate-800 transition-colors shadow-lg flex items-center justify-center">
+                <Save size={20} className="mr-2"/> Зберегти
+            </button>
         </div>
       </div>
 

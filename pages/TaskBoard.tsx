@@ -111,9 +111,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
   const [selectedCycle, setSelectedCycle] = useState<JobCycle | undefined>(undefined);
   const [selectedStageId, setSelectedStageId] = useState<string>(''); 
   
-  // Maps StageID -> List of UserIDs
   const [stageAssignments, setStageAssignments] = useState<Record<string, string[]>>({});
-  // New: StageID -> Planned Quantity (Override)
   const [stageQuantities, setStageQuantities] = useState<Record<string, number>>({});
 
   const [title, setTitle] = useState('');
@@ -125,18 +123,14 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Archive State
   const [archiveConfirmId, setArchiveConfirmId] = useState<string | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
 
-  // Drag & Drop State
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
 
-  // Tech Docs State
   const [techDocs, setTechDocs] = useState<{setupMap: SetupMap | null, productDrawingUrl: string | null}>({ setupMap: null, productDrawingUrl: null });
   const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
 
-  // ... (useEffects remain same) ...
   useEffect(() => {
     let unsubscribeTasks: () => void;
     let unsubscribeOrders: () => void;
@@ -211,7 +205,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
     fetchDocs();
   }, [selectedTask, orders]);
 
-  // Filter Tasks based on Tab
   const activeTasks = tasks.filter(t => t.status !== 'archived');
   const archivedTasks = tasks.filter(t => t.status === 'archived');
 
@@ -219,7 +212,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
   const inProgressTasks = activeTasks.filter(t => t.status === 'in_progress');
   const doneTasks = activeTasks.filter(t => t.status === 'done');
 
-  // ... (Event Handlers remain same) ...
   const handleOrderChange = async (orderId: string) => {
     setSelectedOrderId(orderId);
     const order = orders.find(o => o.id === orderId);
@@ -277,12 +269,11 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
             
             for (let i = 0; i < stages.length; i++) {
                 const stage = stages[i];
-                const isFinal = i === stages.length - 1; // Mark last stage as final
+                const isFinal = i === stages.length - 1; 
                 
                 const assignedUserIds = stageAssignments[stage.id] || [];
                 if (assignedUserIds.length === 0) continue;
 
-                // Use overridden quantity or order default
                 const plannedQty = stageQuantities[stage.id] || selectedOrder?.quantity || 0;
 
                 const newTaskTitle = `${selectedOrder?.orderNumber} - ${stage.name}`;
@@ -297,11 +288,11 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                     createdAt: new Date().toISOString().split('T')[0],
                     orderId: selectedOrderId,
                     stageId: stage.id,
-                    plannedQuantity: plannedQty, // Use per-stage plan
+                    plannedQuantity: plannedQty, 
                     completedQuantity: 0,
                     pendingQuantity: 0,
                     deadline: deadline || selectedOrder?.deadline,
-                    isFinalStage: isFinal // Set final stage flag
+                    isFinalStage: isFinal 
                 };
                 
                 await API.saveTask(newTask);
@@ -315,7 +306,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                 }
             }
             
-            // --- TRIGGER ADMIN NOTIFICATION (Batch Creation) ---
             await API.sendNotification(
                 'admin',
                 `Створено виробничу партію: ${selectedOrder?.orderNumber}`,
@@ -351,7 +341,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
             await API.saveTask(newTask);
 
             if (!editingTaskId) {
-                // Notify Assignees
                 for (const uid of assigneeIds) {
                     await API.sendNotification(
                         uid, 
@@ -359,7 +348,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                         'task_assigned'
                     );
                 }
-                // --- TRIGGER ADMIN NOTIFICATION (Single Task) ---
                 await API.sendNotification(
                     'admin',
                     `Нове завдання: ${finalTitle}`,
@@ -429,7 +417,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
       setDeleteConfirmId(id);
   };
 
-  // --- MODAL ARCHIVE HANDLERS ---
   const handleArchiveClick = (e: React.MouseEvent, taskId: string) => {
       e.stopPropagation();
       e.preventDefault();
@@ -563,6 +550,14 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
   const renderCard = (task: Task, isArchiveView: boolean = false, onArchive?: (id: string) => void) => {
     const assignedUsers = users.filter(u => task.assigneeIds.includes(u.id));
     
+    // Calculate progress with pending reports for visual "contact"
+    const factQty = task.completedQuantity || 0;
+    const pendQty = task.pendingQuantity || 0;
+    const planQty = task.plannedQuantity || 1;
+    
+    const factPercent = (factQty / planQty) * 100;
+    const pendPercent = (pendQty / planQty) * 100;
+
     return (
       <div 
         key={task.id} 
@@ -571,11 +566,19 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
         onClick={() => setSelectedTaskId(task.id)}
         className={`task-card bg-white p-4 rounded-xl border border-gray-200 shadow-sm transition-all cursor-pointer mb-3 group relative overflow-hidden animate-fade-in ${!isEditor && !isArchiveView ? 'hover:shadow-sm' : 'hover:shadow-md'}`}
       >
-        {task.type === 'production' && task.plannedQuantity && (
-          <div className="absolute bottom-0 left-0 h-1 bg-gray-100 w-full">
+        {task.type === 'production' && (
+          <div className="absolute bottom-0 left-0 h-1 bg-gray-100 w-full flex">
             <div 
-              className="h-full bg-green-500 transition-all" 
-              style={{width: `${((task.completedQuantity || 0) / task.plannedQuantity) * 100}%`}}
+              className="h-full bg-green-500 transition-all duration-500" 
+              style={{width: `${Math.min(100, factPercent)}%`}}
+            />
+            <div 
+              className="h-full bg-orange-400 opacity-50 transition-all duration-500" 
+              style={{
+                  width: `${Math.min(100 - factPercent, pendPercent)}%`,
+                  backgroundImage: 'linear-gradient(45deg, rgba(255,255,255,.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.15) 50%, rgba(255,255,255,.15) 75%, transparent 75%, transparent)',
+                  backgroundSize: '1rem 1rem'
+              }}
             />
           </div>
         )}
@@ -674,9 +677,9 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
         {task.type === 'production' && (
            <div className="mb-2">
              <div className="flex justify-between text-[10px] mt-1">
-                <span className="font-bold text-gray-700">{task.completedQuantity} <span className="text-gray-400 font-normal">/ {task.plannedQuantity} шт</span></span>
-                {task.pendingQuantity && task.pendingQuantity > 0 ? (
-                  <span className="text-orange-500 font-bold">+{task.pendingQuantity} перевірка</span>
+                <span className="font-bold text-gray-700">{factQty} <span className="text-gray-400 font-normal">/ {planQty} шт</span></span>
+                {pendQty > 0 ? (
+                  <span className="text-orange-500 font-bold">+{pendQty} очікує</span>
                 ) : null}
              </div>
            </div>
@@ -744,7 +747,10 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                        {(selectedTask.pendingQuantity || 0) > 0 && (
                          <div 
                            className="bg-orange-400 h-full striped-bar transition-all duration-500" 
-                           style={{width: `${Math.min(100, ((selectedTask.pendingQuantity || 0) / (selectedTask.plannedQuantity || 1)) * 100)}%`}}
+                           style={{width: `${Math.min(100, ((selectedTask.pendingQuantity || 0) / (selectedTask.plannedQuantity || 1)) * 100)}%` ,
+                               backgroundImage: 'linear-gradient(45deg, rgba(255,255,255,.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.15) 50%, rgba(255,255,255,.15) 75%, transparent 75%, transparent)',
+                               backgroundSize: '1rem 1rem'
+                           }}
                          />
                        )}
                     </div>
@@ -780,7 +786,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                 <button onClick={() => setSelectedTaskId(null)} className="p-2 bg-white rounded-full text-gray-400 hover:text-gray-900 shadow-md"><X size={24}/></button>
              </div>
 
-             {/* Technical Documentation Panel */}
              {setupMap ? (
                 <div className="space-y-8 animate-fade-in">
                     <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex justify-between items-center">
@@ -795,7 +800,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                     </div>
 
                     <div className={`grid grid-cols-1 md:${gridCols} gap-6`}>
-                        {/* Setup Photo */}
                         {showSetupPhoto && (
                             <div>
                                 <div className="text-sm font-bold text-gray-700 mb-2 flex items-center"><ImageIcon size={16} className="mr-2"/> Наладка</div>
@@ -808,7 +812,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                             </div>
                         )}
 
-                        {/* Drawing Photo */}
                         {showDrawing && (
                             <div>
                                 <div className="text-sm font-bold text-gray-700 mb-2 flex items-center"><FileText size={16} className="mr-2"/> Креслення</div>
@@ -822,7 +825,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                         )}
                     </div>
 
-                    {/* Tool List */}
                     <div>
                         <h4 className="font-bold text-gray-800 mb-3 border-b pb-2">Список інструментів</h4>
                         <div className="space-y-2">
@@ -889,7 +891,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
         </div>
         
         <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
-            {/* Tabs */}
             <div className="flex bg-gray-100 p-1 rounded-lg w-full sm:w-auto">
                 <button 
                     onClick={() => setCurrentTab('active')}
@@ -920,7 +921,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
       <div className="flex-1 overflow-x-auto">
         {currentTab === 'active' ? (
             <div className="flex flex-col md:flex-row md:space-x-6 min-w-[300px] md:min-w-[1000px] h-full gap-4 md:gap-0">
-            {/* TODO COLUMN */}
             <div 
                 className="flex-1 bg-gray-100/50 rounded-2xl p-4 flex flex-col transition-colors min-h-[200px]"
                 onDragOver={handleDragOver}
@@ -940,7 +940,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                 </div>
             </div>
 
-            {/* IN PROGRESS COLUMN */}
             <div 
                 className="flex-1 bg-gray-100/50 rounded-2xl p-4 flex flex-col transition-colors min-h-[200px]"
                 onDragOver={handleDragOver}
@@ -955,7 +954,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                 </div>
             </div>
 
-            {/* DONE COLUMN */}
             <div 
                 className="flex-1 bg-gray-100/50 rounded-2xl p-4 flex flex-col transition-colors min-h-[200px]"
                 onDragOver={handleDragOver}
@@ -996,7 +994,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                </div>
                
                <div className="p-6 space-y-6">
-                  {/* ... (Keep form logic same) */}
                   {!editingTaskId && (
                       <div className="flex bg-gray-100 p-1 rounded-xl">
                          <button 
@@ -1037,7 +1034,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                         <div className="pt-2">
                             <label className="block text-sm font-bold text-gray-700 mb-2">Призначити виконавців</label>
                             <div className="flex flex-wrap gap-2">
-                                {users.length === 0 && <span className="text-xs text-gray-400 italic">Завантаження списку працівників...</span>}
+                                {users.length === 0 && <span className="text-xs text-gray-400 italic">Завантаження працівників...</span>}
                                 {users.map(user => {
                                 const isSelected = assigneeIds.includes(user.id);
                                 return (
@@ -1080,7 +1077,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                               </div>
                               
                               <div>
-                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Розподіл етапів (Створити завдання)</label>
+                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Розподіл етапів</label>
                                  <div className="space-y-2">
                                     {selectedCycle.stages.map((stage, idx) => (
                                        <div key={stage.id} className="flex flex-col md:flex-row items-start md:items-center justify-between p-3 bg-white rounded-lg border border-gray-200 gap-3 md:gap-0">
@@ -1092,7 +1089,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                                              <div className="text-xs text-gray-400 pl-7">{stage.machine}</div>
                                           </div>
                                           
-                                          {/* PLAN QUANTITY INPUT */}
                                           <div className="w-full md:w-24 px-0 md:px-2 flex items-center md:block justify-between">
                                               <label className="text-[9px] uppercase font-bold text-gray-400 mb-0.5 block md:mb-1 mr-2 md:mr-0">План (шт)</label>
                                               <input 
@@ -1114,48 +1110,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                                     ))}
                                  </div>
                               </div>
-                           </div>
-                        )}
-                        
-                        {selectedOrder && (!selectedCycle || editingTaskId) && (
-                           <div>
-                               {editingTaskId ? (
-                                   <div className="bg-blue-50 p-3 rounded text-sm text-blue-800 mb-4">
-                                       Редагування одного завдання.
-                                   </div>
-                               ) : (
-                                   <div className="text-red-500 text-sm bg-red-50 p-3 rounded-lg mb-4">
-                                       Увага: До виробу в цьому замовленні не прив'язаний техпроцес (Цикл робіт).
-                                   </div>
-                               )}
-                               
-                               <label className="block text-sm font-bold text-gray-700 mb-1">Назва завдання</label>
-                               <input 
-                                 value={title}
-                                 onChange={e => setTitle(e.target.value)}
-                                 className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                 placeholder="Напр: Токарна обробка"
-                               />
-                               
-                               <div className="pt-2">
-                                    <label className="block text-sm font-bold text-gray-700 mb-2">Призначити виконавців</label>
-                                    <div className="flex flex-wrap gap-2">
-                                        {users.map(user => {
-                                        const isSelected = assigneeIds.includes(user.id);
-                                        return (
-                                            <button 
-                                            key={user.id}
-                                            onClick={() => toggleAssignee(user.id)}
-                                            className={`flex items-center px-3 py-1.5 rounded-full border text-sm font-medium transition-all ${isSelected ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}
-                                            >
-                                            <img src={user.avatar || `https://ui-avatars.com/api/?name=${user.firstName}+${user.lastName}`} className="w-5 h-5 rounded-full mr-2 border border-white"/>
-                                            {user.firstName} {user.lastName}
-                                            {isSelected && <CheckCircle size={12} className="ml-2"/>}
-                                            </button>
-                                        );
-                                        })}
-                                    </div>
-                               </div>
                            </div>
                         )}
                      </div>
@@ -1203,7 +1157,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                     className="bg-slate-900 text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-slate-800 transition-all disabled:opacity-50 flex items-center"
                   >
                     {isSubmitting && <Loader size={16} className="animate-spin mr-2"/>}
-                    {editingTaskId ? 'Зберегти зміни' : (taskType === 'production' && selectedCycle ? 'Створити завдання (Всі етапи)' : 'Створити завдання')}
+                    {editingTaskId ? 'Зберегти зміни' : (taskType === 'production' && selectedCycle ? 'Створити партію' : 'Створити завдання')}
                   </button>
                </div>
             </div>
@@ -1216,7 +1170,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
         <DeleteConfirmModal 
             isOpen={!!deleteConfirmId}
             title="Видалити завдання?"
-            message="Ви впевнені? Це незворотня дія. Для історії краще використати 'Архів'."
+            message="Ви впевнені? Це незворотня дія."
             onClose={() => setDeleteConfirmId(null)}
             onConfirm={confirmDelete}
             isDeleting={isDeleting}

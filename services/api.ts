@@ -1103,13 +1103,30 @@ const ApiService = {
 
   async approveReport(id: string, report: ProductionReport): Promise<void> {
       try {
+          // 1. Mark report as approved
           await updateDoc(doc(db, REPORTS_COLLECTION, id), { status: 'approved' });
+          
           const taskRef = doc(db, TASKS_COLLECTION, report.taskId);
-          await updateDoc(taskRef, {
-              completedQuantity: increment(report.quantity),
-              pendingQuantity: increment(-report.quantity)
-          });
-      } catch(e) { throw e; }
+          const taskSnap = await getDoc(taskRef);
+          
+          if (taskSnap.exists()) {
+            const taskData = taskSnap.data();
+            const newFact = (taskData.factQuantity || 0) + report.quantity;
+            const plan = taskData.planQuantity || 0;
+            
+            // 2. Update task quantities and status
+            await updateDoc(taskRef, {
+                factQuantity: increment(report.quantity),
+                pendingQuantity: increment(-report.quantity),
+                status: (newFact >= plan && plan > 0) ? 'done' : 'in_progress',
+                updatedAt: serverTimestamp()
+            });
+            console.log("✅ Task progress updated successfully upon approval.");
+          }
+      } catch(e) { 
+        console.error("🔥 Error in approveReport API:", e);
+        throw e; 
+      }
   },
 
   async rejectReport(id: string, report: ProductionReport): Promise<void> {
@@ -1117,7 +1134,8 @@ const ApiService = {
           await updateDoc(doc(db, REPORTS_COLLECTION, id), { status: 'rejected' });
           const taskRef = doc(db, TASKS_COLLECTION, report.taskId);
           await updateDoc(taskRef, {
-              pendingQuantity: increment(-report.quantity)
+              pendingQuantity: increment(-report.quantity),
+              updatedAt: serverTimestamp()
           });
       } catch(e) { throw e; }
   },

@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { store } from '../services/mockStore';
 import { API } from '../services/api';
-import { Product, Drawing, SetupMap, Tool, SetupBlock, ProductStock, ProductFolder, DefectItem, SetupComponentRequirement, Task, Order, ProductionReport, User } from '../types';
+import { Product, Drawing, SetupMap, Tool, SetupBlock, ProductStock, ProductFolder, DefectItem, SetupComponentRequirement, Task, Order, ProductionReport, User, JobCycle, JobStage } from '../types';
 import { SearchableSelect } from '../components/SearchableSelect';
 import { uploadFileToCloudinary } from '../services/cloudinary';
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal';
@@ -94,6 +94,9 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
   const [newMapDrawingId, setNewMapDrawingId] = useState('');
   const [newMapComponents, setNewMapComponents] = useState<SetupComponentRequirement[]>([]);
   const [newMapBlocks, setNewMapBlocks] = useState<{tempId: string, toolNumber: string, toolName: string, toolId?: string, settings: string}[]>([]);
+  
+  // NEW: State for Cycle Stages (for Setup Map Modal)
+  const [currentCycleStages, setCurrentCycleStages] = useState<JobStage[]>([]);
 
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -235,6 +238,60 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
       fetchTools();
     }
   }, [isMapModalOpen]);
+
+  // NEW: Fetch Cycle Stages when Product ID changes in Map Modal
+  useEffect(() => {
+    const fetchCycleStages = async () => {
+        // Clear stages if no product
+        if (!newMapProductId) {
+            setCurrentCycleStages([]);
+            return;
+        }
+
+        console.log("🛠 SetupMap: Analyzing Product...", newMapProductId);
+
+        let targetCycle: JobCycle | null = null;
+
+        // 1. Direct Link Check (Product -> Cycle)
+        const product = products.find(p => p.id === newMapProductId);
+        if (product && product.jobCycleId) {
+            console.log("   ↳ Found direct cycle link in Product:", product.jobCycleId);
+            try {
+                const item = await API.getWorkStorageItem(product.jobCycleId);
+                if (item && 'stages' in item) targetCycle = item as JobCycle;
+            } catch (e) {
+                console.error("   ⚠️ Failed to fetch linked cycle:", e);
+            }
+        }
+
+        // 2. Reverse Link Check (Cycle -> Product)
+        if (!targetCycle) {
+            console.log("   ↳ No direct link. Searching for cycles referencing this product...");
+            try {
+                const linkedCycles = await API.getJobCyclesByProduct(newMapProductId);
+                if (linkedCycles.length > 0) {
+                    targetCycle = linkedCycles[0];
+                    console.log("   ✅ Found linked cycle:", targetCycle.name);
+                } else {
+                    console.log("   ❌ No linked cycles found.");
+                }
+            } catch (e) {
+                console.error("   ⚠️ Error searching cycles:", e);
+            }
+        }
+
+        // 3. Update State
+        if (targetCycle && targetCycle.stages) {
+            console.log(`   🎉 Stages loaded: ${targetCycle.stages.length}`);
+            setCurrentCycleStages(targetCycle.stages);
+        } else {
+            console.warn("   ⚠️ Cycle found but has no stages, or no cycle found.");
+            setCurrentCycleStages([]);
+        }
+    };
+
+    fetchCycleStages();
+  }, [newMapProductId, products]);
 
   useEffect(() => {
     refreshMockData();
@@ -1321,13 +1378,19 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                             {newMapComponents.map((comp, idx) => (
                                 <div key={idx} className="flex gap-2 items-center">
                                     <div className="flex-1">
-                                        <input 
-                                            type="text" 
-                                            className="w-full p-1 border rounded text-xs" 
-                                            placeholder="Назва компонента / етапу (напр. Етап №1)"
+                                        <select 
+                                            className="w-full p-1 border rounded text-xs bg-white outline-none focus:border-blue-500" 
                                             value={comp.name || ''} 
                                             onChange={e => updateComponentRequirement(idx, 'name', e.target.value)}
-                                        />
+                                            disabled={!newMapProductId || currentCycleStages.length === 0}
+                                        >
+                                            <option value="">{newMapProductId ? (currentCycleStages.length > 0 ? "-- Оберіть етап-джерело --" : "-- Цикл робіт порожній/відсутній --") : "-- Спочатку оберіть виріб --"}</option>
+                                            {currentCycleStages.map((stage, sIdx) => (
+                                                <option key={stage.id} value={stage.name}>
+                                                    {sIdx + 1}. {stage.name} ({stage.machine})
+                                                </option>
+                                            ))}
+                                        </select>
                                     </div>
                                     <div className="w-20">
                                         <input 
@@ -1344,7 +1407,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                                 </div>
                             ))}
                           </div>
-                          <p className="text-[10px] text-gray-400 mt-1">Вкажіть точну назву етапу або компонента, щоб система могла знайти відповідні партії на складі WIP.</p>
+                          <p className="text-[10px] text-gray-400 mt-1">Оберіть етап, з якого надходить деталь для цієї операції (для списання зі складу WIP).</p>
                       </div>
 
                       {/* Tool Blocks */}

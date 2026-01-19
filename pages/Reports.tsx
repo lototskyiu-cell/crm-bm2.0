@@ -4,7 +4,7 @@ import { API } from '../services/api';
 import { store } from '../services/mockStore'; 
 import { Task, ProductionReport, User, Order } from '../types';
 import { CheckCircle, AlertCircle, FileText, Plus, Search, X, Download, ArrowRight, CheckSquare, Square, Pencil, Loader, Save, Link, Package } from 'lucide-react';
-import { collection, query, where, getDocs, writeBatch, doc, increment } from "firebase/firestore";
+import { collection, query, where, getDocs, writeBatch, doc, increment, serverTimestamp, getDoc, updateDoc, addDoc } from "firebase/firestore";
 import { db } from "../services/firebase";
 
 interface ReportsProps {
@@ -65,7 +65,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
         setOrders(data);
     });
 
-    // Fetch users for display
     API.getUsers().then(users => setAllUsers(users));
 
     return () => {
@@ -78,22 +77,18 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
   // --- LOGIC TO FETCH FROM setup_cards ---
   useEffect(() => {
       const calculateConsumption = async () => {
-          setConsumptionGroups([]); // Clear previous
+          setConsumptionGroups([]); 
 
-          // 1. Check if product is selected via task -> order
           const task = tasks.find(t => t.id === selectedTaskId);
           const order = orders.find(o => o.id === task?.orderId);
-          // Log object for debugging
           const selectedProduct = order ? { id: order.productId } : undefined;
 
           if (!selectedProduct) return;
 
           try {
-              // Query 'setup_cards' collection using 'productId'
               const q = query(collection(db, 'setup_cards'), where('productId', '==', selectedProduct.id));
               let snapshot = await getDocs(q);
 
-              // Fallback query if 'productId' index is missing but 'productCatalogId' exists
               if (snapshot.empty) {
                  const q2 = query(collection(db, 'setup_cards'), where('productCatalogId', '==', selectedProduct.id));
                  snapshot = await getDocs(q2);
@@ -101,7 +96,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
 
               if (!snapshot.empty) {
                   const cardData = snapshot.docs[0].data();
-                  // Use 'any' cast to access dynamic fields safely
                   const d = cardData as any;
                   const components = d.inputComponents || [];
 
@@ -113,7 +107,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                           const requiredQty = Number(comp.qty || comp.ratio || 0);
                           const compName = comp.name || `Stage ${comp.sourceStageIndex !== undefined ? comp.sourceStageIndex + 1 : '?'}`;
                           
-                          // Search for available batches (Approved, Has Qty, Matching Order, Matching Name)
                           const available = reports.filter(r => 
                               r.status === 'approved' &&
                               (r.quantity - (r.usedQuantity || 0)) > 0 &&
@@ -157,7 +150,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
       
       group.selectedBatchIds = newSet;
       
-      // Recalculate selected total
       group.selectedTotal = group.availableBatches
         .filter(b => newSet.has(b.id))
         .reduce((sum, b) => sum + (b.quantity - (b.usedQuantity || 0)), 0);
@@ -166,104 +158,142 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
   };
 
   const handleSubmit = async () => {
-    if (!selectedTaskId || !qty) return;
+    // --- 🕵️‍♂️ DEBUGGING BLOCK ---
+    console.log("=== REPORT SUBMISSION START ===");
+    console.log("🎯 Selected Task ID from UI:", selectedTaskId);
+
+    const currentTask = tasks.find(t => t.id === selectedTaskId);
+    const currentOrder = currentTask?.orderId ? orders.find(o => o.id === currentTask.orderId) : null;
+    
+    if (!qty) {
+        alert("Введіть кількість!");
+        return;
+    }
 
     // Validate Consumption
     for (const group of consumptionGroups) {
         if (group.selectedTotal < group.totalNeeded) {
-            alert(`Недостатньо матеріалів: "${group.name}"!\nПотрібно: ${group.totalNeeded}\nОбрано: ${group.selectedTotal}\n\nБудь ласка, виберіть необхідну кількість партій з доступних.`);
+            alert(`Недостатньо матеріалів: "${group.name}"!\nПотрібно: ${group.totalNeeded}\nОбрано: ${group.selectedTotal}\n\nБудь ласка, виберіть необхідну кількість партій.`);
             return;
         }
     }
 
     setIsSubmitting(true);
 
-    const task = tasks.find(t => t.id === selectedTaskId);
-    const order = task?.orderId ? orders.find(o => o.id === task.orderId) : null;
-
-    // Collect consumed IDs for traceability
-    const allSourceBatchIds: string[] = [];
-    consumptionGroups.forEach(g => {
-        g.selectedBatchIds.forEach(id => allSourceBatchIds.push(id));
-    });
-
-    const newReport: ProductionReport = {
-      id: '', // Will be set by Firestore
-      taskId: selectedTaskId,
-      userId: currentUser?.id || 'unknown',
-      date: new Date().toISOString().split('T')[0],
-      quantity: Number(qty),
-      scrapQuantity: Number(scrap) || 0,
-      notes: note,
-      status: 'pending',
-      type: 'production',
-      createdAt: new Date().toISOString(),
-      sourceBatchIds: allSourceBatchIds,
-      usedQuantity: 0,
-      // Snapshots
-      taskTitle: task?.title || 'Unknown Task',
-      orderNumber: order?.orderNumber || 'Unknown Order',
-      stageName: task?.title,
-      batchCode: batchCode || 'Без маркування'
-    };
-
     try {
-        // --- ATOMIC TRANSACTION (Batch Write) ---
-        const batchWrite = writeBatch(db);
+        const qtyNumber = Number(qty);
+        const scrapNumber = Number(scrap) || 0;
 
-        // 1. Create Report
-        const reportRef = doc(collection(db, "reports")); // Generate ID
-        batchWrite.set(reportRef, { ...newReport }); // Set data
+        // Collect consumed IDs
+        const allSourceBatchIds: string[] = [];
+        consumptionGroups.forEach(g => {
+            g.selectedBatchIds.forEach(id => allSourceBatchIds.push(id));
+        });
 
-        // 2. Consume Materials (Deduct from previous batches)
-        for (const group of consumptionGroups) {
-            let remainingToConsume = group.totalNeeded;
+        // --- 1. CREATE REPORT DOCUMENT ---
+        const newReportPayload: any = {
+            taskId: selectedTaskId,
+            userId: currentUser?.id || 'unknown',
+            date: new Date().toISOString().split('T')[0],
+            quantity: qtyNumber,
+            scrapQuantity: scrapNumber,
+            notes: note,
+            status: 'pending',
+            type: 'production',
+            createdAt: new Date().toISOString(),
+            sourceBatchIds: allSourceBatchIds,
+            usedQuantity: 0,
+            taskTitle: currentTask?.title || 'Unknown Task',
+            orderNumber: currentOrder?.orderNumber || 'Unknown Order',
+            stageName: currentTask?.title,
+            batchCode: batchCode || 'Без маркування'
+        };
+
+        const reportRef = await addDoc(collection(db, "reports"), newReportPayload);
+        console.log("✅ Report saved with ID:", reportRef.id);
+
+        // --- 2. 🎯 БЛОК ОНОВЛЕННЯ ПРОГРЕСУ (Direct ID Priority) ---
+        let taskRef = null;
+
+        // ВАРІАНТ 1: У нас вже є ID (це найнадійніше)
+        if (selectedTaskId) {
+            console.log("🎯 Використовую прямий ID завдання:", selectedTaskId);
+            taskRef = doc(db, 'tasks', selectedTaskId);
+        } 
+        // ВАРІАНТ 2: ID немає, шукаємо вручну (Fallback)
+        else if (currentOrder?.id || currentTask?.orderId) {
+            const targetOrderId = currentOrder?.id || currentTask?.orderId;
+            console.log("🔍 ID немає, шукаю завдання через пошук за OrderID:", targetOrderId);
             
-            for (const batchId of Array.from(group.selectedBatchIds)) {
-                if (remainingToConsume <= 0) break;
-
-                const sourceBatch = group.availableBatches.find(r => r.id === batchId);
-                if (sourceBatch) {
-                    const available = sourceBatch.quantity - (sourceBatch.usedQuantity || 0);
-                    const take = Math.min(available, remainingToConsume);
-                    
-                    // Increment usedQuantity in source batch
-                    const sourceRef = doc(db, "reports", batchId);
-                    batchWrite.update(sourceRef, {
-                        usedQuantity: increment(take)
-                    });
-                    
-                    remainingToConsume -= take;
+            const tasksRef = collection(db, 'tasks');
+            const q = query(tasksRef, where("orderId", "==", targetOrderId));
+            const querySnapshot = await getDocs(q);
+            
+            for (const docSnapshot of querySnapshot.docs) {
+                if (docSnapshot.data().title === currentTask?.title) {
+                    taskRef = doc(db, 'tasks', docSnapshot.id);
+                    console.log("✅ Знайдено завдання через пошук:", docSnapshot.id);
+                    break;
                 }
             }
         }
 
-        // 3. Update Task Pending Quantity
-        const taskRef = doc(db, "tasks", selectedTaskId);
-        batchWrite.update(taskRef, {
-            pendingQuantity: increment(Number(qty))
-        });
-
-        // Commit all changes
-        await batchWrite.commit();
-
-        // 4. Send Notification (Fixed Logic: Use target='admin')
-        try {
-            const workerName = currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'Працівник';
-            const taskTitle = task?.title || 'Завдання';
-            const message = `Новий звіт від ${workerName}: ${taskTitle} (${qty} шт)`;
-            
-            await API.sendNotification(
-                'admin', // Generic ID
-                message,
-                'report_submitted',
-                reportRef.id,
-                'admin', // TARGET: ADMIN
-                'Новий звіт'
-            );
-        } catch (notifError: any) {
-            console.error("Notification Error:", notifError);
+        // 3. Виконуємо оновлення, якщо посилання є
+        if (taskRef) {
+            try {
+                const taskSnap = await getDoc(taskRef);
+                if (taskSnap.exists()) {
+                    // Ми оновлюємо pendingQuantity, бо звіт спочатку має статус 'pending'
+                    // Це покаже помаранчеву смужку прогресу на дошці
+                    await updateDoc(taskRef, {
+                        pendingQuantity: increment(qtyNumber),
+                        updatedAt: serverTimestamp()
+                    });
+                    console.log("✅ Прогрес завдання (очікування) оновлено успішно!");
+                }
+            } catch (e) {
+                console.error("Помилка при запису в завдання:", e);
+            }
         }
+
+        // --- 3. UPDATE ORDER ACTIVITY ---
+        if (currentOrder) {
+            const orderRef = doc(db, 'orders', currentOrder.id);
+            await updateDoc(orderRef, { lastActivity: serverTimestamp() }); 
+        }
+
+        // --- 4. CONSUME MATERIALS ---
+        if (consumptionGroups.length > 0) {
+            const batchWrite = writeBatch(db);
+            for (const group of consumptionGroups) {
+                let remainingToConsume = group.totalNeeded;
+                for (const batchId of Array.from(group.selectedBatchIds)) {
+                    if (remainingToConsume <= 0) break;
+                    const sourceRef = doc(db, "reports", batchId);
+                    const sourceBatch = group.availableBatches.find(r => r.id === batchId);
+                    if (sourceBatch) {
+                        const available = sourceBatch.quantity - (sourceBatch.usedQuantity || 0);
+                        const take = Math.min(available, remainingToConsume);
+                        batchWrite.update(sourceRef, { usedQuantity: increment(take) });
+                        remainingToConsume -= take;
+                    }
+                }
+            }
+            await batchWrite.commit();
+        }
+
+        // --- 5. NOTIFICATION ---
+        const workerName = currentUser ? `${currentUser.firstName} ${currentUser.lastName}` : 'Працівник';
+        await API.sendNotification(
+            'admin',
+            `Новий звіт: ${currentTask?.title || 'Завдання'} (+${qtyNumber} шт) від ${workerName}`,
+            'info',
+            reportRef.id,
+            'admin',
+            'Новий звіт'
+        );
+
+        alert(`Звіт збережено!\nПрогрес завдання: +${qtyNumber} (Очікує підтвердження).`);
 
         // Reset Form
         setIsFormOpen(false);
@@ -272,9 +302,10 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
         setNote('');
         setBatchCode('');
         setConsumptionGroups([]);
-    } catch (e) {
-        console.error("Failed to submit report:", e);
-        alert("Failed to submit report. Please try again.");
+
+    } catch (e: any) {
+        console.error("🔥 Critical Failure in handleSubmit:", e);
+        alert(`Помилка: ${e.message}`);
     } finally {
         setIsSubmitting(false);
     }
@@ -293,14 +324,12 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
 
   const getFilteredHistory = () => {
     return reports.filter(r => {
-      // 1. Search Filter
       let matchesSearch = true;
       if (historySearch) {
         const term = historySearch.toLowerCase();
         const tTitle = r.taskTitle || tasks.find(t => t.id === r.taskId)?.title || '';
         const oNum = r.orderNumber || (tasks.find(t => t.id === r.taskId)?.orderId ? orders.find(o => o.id === tasks.find(t => t.id === r.taskId)?.orderId)?.orderNumber : '') || '';
         const user = allUsers.find(u => u.id === r.userId);
-        
         matchesSearch = 
           (tTitle.toLowerCase().includes(term)) ||
           (user?.firstName?.toLowerCase().includes(term) || false) ||
@@ -308,16 +337,9 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
           (oNum.toLowerCase().includes(term)) ||
           (r.batchCode?.toLowerCase().includes(term) || false);
       }
-
-      // 2. Date Filter
       let matchesDate = true;
-      if (dateFrom) {
-        matchesDate = matchesDate && r.date >= dateFrom;
-      }
-      if (dateTo) {
-        matchesDate = matchesDate && r.date <= dateTo;
-      }
-
+      if (dateFrom) matchesDate = matchesDate && r.date >= dateFrom;
+      if (dateTo) matchesDate = matchesDate && r.date <= dateTo;
       return matchesSearch && matchesDate;
     }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   };
@@ -326,11 +348,8 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
   const isAllSelected = filteredHistory.length > 0 && selectedReportIds.size === filteredHistory.length;
 
   const toggleSelectAll = () => {
-    if (isAllSelected) {
-      setSelectedReportIds(new Set());
-    } else {
-      setSelectedReportIds(new Set(filteredHistory.map(r => r.id)));
-    }
+    if (isAllSelected) setSelectedReportIds(new Set());
+    else setSelectedReportIds(new Set(filteredHistory.map(r => r.id)));
   };
 
   const toggleSelect = (id: string) => {
@@ -346,7 +365,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
     setEditQty(report.quantity.toString());
     setEditScrap(report.scrapQuantity.toString());
     setEditNote(report.notes || '');
-    // Calculate total produced historically (good + scrap) to keep data integrity if editing distribution
     setEditLockedTotal(report.quantity + report.scrapQuantity);
     setIsEditModalOpen(true);
   };
@@ -355,7 +373,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
     const newScrap = Number(value);
     if (newScrap < 0) return;
     setEditScrap(value);
-    // Auto-adjust quantity to maintain total if desired
     let newQty = editLockedTotal - newScrap;
     if (newQty < 0) newQty = 0;
     setEditQty(newQty.toString());
@@ -418,16 +435,8 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
         let dateStr = "";
         try {
             const dateObj = new Date(r.createdAt);
-            dateStr = dateObj.toLocaleString('uk-UA', { 
-                day: '2-digit', 
-                month: '2-digit', 
-                year: 'numeric', 
-                hour: '2-digit', 
-                minute: '2-digit'
-            }).replace(',', '');
-        } catch (e) {
-            dateStr = "Invalid Date";
-        }
+            dateStr = dateObj.toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).replace(',', '');
+        } catch (e) { dateStr = "Invalid Date"; }
 
         const safeWorker = workerName.replace(/;/g, " ");
         const safeTask = taskTitle.replace(/;/g, " ");
@@ -454,7 +463,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
     document.body.removeChild(link);
   };
 
-  // --- WORKER VIEW RENDER ---
   if (currentUser && currentUser.role === 'worker') {
     return (
       <div className="p-8">
@@ -468,7 +476,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
           </button>
         </div>
 
-        {/* --- REPORT HISTORY CARD (Worker) --- */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
            <div className="bg-gray-50 px-6 py-4 border-b font-bold text-gray-700">Моя історія звітів</div>
            <div className="divide-y divide-gray-100">
@@ -497,7 +504,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
            </div>
         </div>
 
-        {/* --- NEW REPORT MODAL (Updated) --- */}
         {isFormOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
              <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 my-auto">
@@ -551,7 +557,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                       </div>
                    </div>
 
-                   {/* CONSUMPTION LOGIC BLOCK */}
                    {consumptionGroups.length > 0 && Number(qty) > 0 && (
                        <div className="space-y-3 animate-fade-in">
                            {consumptionGroups.map((group, gIdx) => (
@@ -631,13 +636,11 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
     );
   }
 
-  // --- ADMIN VIEW (Standard) ---
   return (
     <div className="p-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">Керування звітами</h1>
       
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* LEFT: PENDING COLUMN */}
         <div className="space-y-4">
            <h2 className="font-bold text-gray-500 uppercase text-xs tracking-wider flex items-center mb-4">
              <AlertCircle size={16} className="mr-2 text-yellow-500"/> Очікують підтвердження ({pendingReports.length})
@@ -669,7 +672,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                    </div>
                    {report.notes && <div className="bg-gray-50 p-2 rounded text-sm text-gray-600 mb-3 ml-2 italic border border-gray-100">"{report.notes}"</div>}
                    
-                   {/* Source Batch Traceability */}
                    {report.sourceBatchIds && report.sourceBatchIds.length > 0 && (
                        <div className="mb-3 ml-2">
                            <div className="text-[10px] text-gray-400 uppercase font-bold mb-1 flex items-center"><Link size={10} className="mr-1"/> Збірка з партій:</div>
@@ -690,7 +692,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
            })}
         </div>
 
-        {/* RIGHT: HISTORY COLUMN WITH FILTER */}
         <div className="flex flex-col h-[calc(100vh-150px)]">
            <div className="flex justify-between items-center mb-4 shrink-0">
               <div className="flex items-center">
@@ -707,7 +708,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
               </div>
            </div>
 
-           {/* Filters */}
            <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm mb-4 shrink-0 space-y-3">
               <div className="relative">
                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
@@ -733,7 +733,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
               </div>
            </div>
 
-           {/* History List */}
            <div className="bg-white rounded-xl border border-gray-200 overflow-y-auto flex-1 shadow-sm custom-scrollbar">
               {filteredHistory.length === 0 ? (<div className="p-8 text-center text-gray-400 text-sm italic">Записів не знайдено</div>) : (
                  filteredHistory.map(report => {
@@ -769,7 +768,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
         </div>
       </div>
 
-      {/* EDIT MODAL */}
       {isEditModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
              <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">

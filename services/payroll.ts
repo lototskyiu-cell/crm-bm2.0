@@ -193,7 +193,8 @@ export const PayrollService = {
     // Overtime pay (Only if approved)
     if (overtimeHours > 0) {
       if (record.overtimeApproved) {
-         totalPay += overtimeHours * hourlyRate;
+         // Apply 1.5x multiplier for overtime
+         totalPay += overtimeHours * hourlyRate * 1.5;
       }
     }
 

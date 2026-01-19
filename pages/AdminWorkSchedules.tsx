@@ -36,7 +36,8 @@ export const AdminWorkSchedules: React.FC = () => {
         API.getUsers()
       ]);
       setSchedules(scheds);
-      setUsers(usrs);
+      // Filter out dismissed users so they don't count towards schedule assignment stats
+      setUsers(usrs.filter(u => u.status !== 'dismissed'));
     } catch (e) {
       console.error(e);
     } finally {
