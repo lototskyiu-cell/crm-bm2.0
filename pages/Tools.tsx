@@ -13,7 +13,8 @@ import {
   orderBy,
   limit,
   onSnapshot,
-  addDoc
+  addDoc,
+  updateDoc
 } from "firebase/firestore";
 import { db } from "../services/firebase";
 import { API } from '../services/api'; 
@@ -140,31 +141,38 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
   const fetchItems = async () => {
     setIsLoading(true);
     try {
+      // 1. Fetch all collections in parallel
       const [catSnap, whSnap, prSnap] = await Promise.all([
         getDocs(collection(db, 'toolCatalog')),
         getDocs(collection(db, 'toolWarehouse')),
         getDocs(collection(db, 'toolProduction'))
       ]);
 
+      // 2. Create maps for fast quantity lookup
       const whMap = new Map(whSnap.docs.map(d => [d.id, d.data().quantity || 0]));
       const prMap = new Map(prSnap.docs.map(d => [d.id, d.data().quantity || 0]));
 
-      const combinedItems = catSnap.docs.map(doc => {
-        const data = doc.data();
-        const whQty = whMap.get(doc.id) || 0;
-        const critLimit = data.criticalQuantity || 0;
-        
-        return {
-          id: doc.id,
-          ...data,
-          quantity: whQty,
-          productionQuantity: prMap.get(doc.id) || 0,
-          photo: data.photoUrl || data.photo || '',
-          isCritical: whQty <= critLimit && critLimit > 0
-        };
+      // 3. Combine and Filter
+      const allItems = catSnap.docs.map(doc => {
+          const data = doc.data();
+          const whQty = whMap.get(doc.id) || 0;
+          const critLimit = data.criticalQuantity || 0;
+          
+          return {
+            id: doc.id,
+            ...data,
+            quantity: whQty,
+            productionQuantity: prMap.get(doc.id) || 0,
+            photo: data.photoUrl || data.photo || '',
+            isCritical: whQty <= critLimit && critLimit > 0
+          };
       });
 
-      setItems(combinedItems);
+      // 4. CLIENT-SIDE FILTER: Hide archived items
+      // We check if isArchived is explicitly true. If undefined/false, we keep it.
+      const activeItems = allItems.filter((item: any) => item.isArchived !== true);
+
+      setItems(activeItems);
     } catch (error) {
       console.error("Помилка завантаження даних:", error);
     } finally {
@@ -188,6 +196,19 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
   const openNewFolderModal = () => {
     setFolderForm({ id: null, name: '', color: '#3b82f6' });
     setIsFolderModalOpen(true);
+  };
+
+  // --- NEW: HANDLE ARCHIVE ITEM ---
+  const handleArchiveItem = async (id: string) => {
+    if (window.confirm("Ви впевнені, що хочете видалити цей інструмент?")) {
+        try {
+            await updateDoc(doc(db, 'toolCatalog', id), { isArchived: true });
+            fetchItems(); // Refresh to filter out the archived item
+        } catch (e) {
+            console.error(e);
+            alert("Помилка видалення (архівування)");
+        }
+    }
   };
 
   const confirmDelete = async () => {
@@ -494,7 +515,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
                              </span>
                              <div className="absolute top-2 right-2 flex gap-1">
                                 <button onClick={e => { e.stopPropagation(); setEditingId(t.id); setNewTool(t); setIsToolModalOpen(true); }} className="p-1 bg-white shadow rounded hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"><Pencil size={12}/></button>
-                                <button onClick={e => { e.stopPropagation(); setDeleteConfirm({isOpen: true, type: 'tool', id: t.id}); }} className="p-1 bg-white shadow rounded hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={12}/></button>
+                                <button onClick={e => { e.stopPropagation(); handleArchiveItem(t.id); }} className="p-1 bg-white shadow rounded hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={12}/></button>
                              </div>
                          </div>
                      ))}
@@ -534,6 +555,7 @@ export const Tools: React.FC<ToolsProps> = ({ currentUser }) => {
                                         <button onClick={() => { setStockOp({ type: 'add', itemId: item.id, qty: 1, target: '' }); setIsStockModalOpen(true); }} className="w-8 h-8 rounded-lg bg-green-100 text-green-700 flex items-center justify-center hover:bg-green-200" title="Прихід"><Plus size={16}/></button>
                                         <button onClick={() => { setStockOp({ type: 'move', itemId: item.id, qty: 1, target: 'Виробництво' }); setIsStockModalOpen(true); }} className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center hover:bg-blue-200" title="В цех"><ArrowRight size={16}/></button>
                                         <button onClick={() => { setEditingItem(item); setIsItemEditModalOpen(true); }} className="p-2 text-gray-400 hover:text-blue-600 rounded transition-all"><Pencil size={14}/></button>
+                                        <button onClick={() => handleArchiveItem(item.id)} className="p-2 text-gray-400 hover:text-red-600 rounded transition-all" title="Видалити"><Trash2 size={14}/></button>
                                     </div>
                                 </div>
                             </div>
