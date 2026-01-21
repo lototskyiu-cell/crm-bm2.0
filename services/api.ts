@@ -17,7 +17,6 @@ import {
   Timestamp,
   updateDoc,
   writeBatch,
-  // Added missing 'limit' import for Firestore queries
   limit
 } from "firebase/firestore";
 import { User, AttendanceRecord, WorkSchedule, Order, Task, Product, ProductStock, DefectItem, SetupMap, Drawing, Tool, JobFolder, JobCycle, Notification, ProductionReport, RoleConfig, ToolFolder, WarehouseItem, ProductionItem, ToolTransaction, JobStage } from "../types";
@@ -34,11 +33,10 @@ const DRAWINGS_COLLECTION = "drawings";
 const WAREHOUSE_PRODUCTS_COLLECTION = "warehouseProducts";
 const DEFECTS_COLLECTION = "defects";
 const DEFECT_HISTORY_COLLECTION = "defectHistory";
-const SETUP_MAPS_COLLECTION = "setupMaps";
+const SETUP_MAPS_COLLECTION = "setup_cards"; // Fixed: Unified collection name
 const WORK_STORAGE_COLLECTION = "workStorage";
 const NOTIFICATIONS_COLLECTION = "notifications";
 const REPORTS_COLLECTION = "reports";
-// Added missing tool folders collection name
 const TOOL_FOLDERS_COLLECTION = "toolFolders";
 
 // Helper to handle permission errors gracefully
@@ -159,8 +157,8 @@ const ApiService = {
         }
 
         return {
-          id: doc.id,
           ...data,
+          id: doc.id, // Ensure Doc ID overrides data ID
           firstName: firstName || 'User',
           lastName: lastName || doc.id.substring(0, 4)
         } as User;
@@ -177,7 +175,7 @@ const ApiService = {
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
         const data = docSnap.data();
-        return { id: docSnap.id, ...data } as User;
+        return { ...data, id: docSnap.id } as User;
       }
       return null;
     } catch (error) {
@@ -215,7 +213,7 @@ const ApiService = {
         throw new Error("Невірний пароль! Спробуйте ще раз.");
       }
 
-      return { id: userDoc.id, ...data } as User;
+      return { ...data, id: userDoc.id } as User;
     } catch (error: any) {
       if (error.message === "Користувача з таким логіном не знайдено" || error.message === "Невірний пароль! Спробуйте ще раз.") {
         throw error;
@@ -234,7 +232,7 @@ const ApiService = {
       if (typeof date === 'string') q = query(q, where("date", "==", date));
       
       const snapshot = await getDocs(q);
-      let records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AttendanceRecord));
+      let records = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as AttendanceRecord));
       
       if (date instanceof Date) {
           const targetMonth = date.getMonth();
@@ -279,7 +277,7 @@ const ApiService = {
   async getSchedules(): Promise<WorkSchedule[]> {
       try {
           const snap = await getDocs(collection(db, SCHEDULES_COLLECTION));
-          return snap.docs.map(d => ({id: d.id, ...d.data()} as WorkSchedule));
+          return snap.docs.map(d => ({...d.data(), id: d.id} as WorkSchedule));
       } catch (e) {
           handleFirestoreError(e, 'getSchedules');
           return [];
@@ -314,7 +312,7 @@ const ApiService = {
   subscribeToNotifications(userId: string, callback: (notifications: Notification[]) => void): () => void {
     const q = query(collection(db, NOTIFICATIONS_COLLECTION), orderBy('createdAt', 'desc'), limit(50));
     return onSnapshot(q, (snapshot) => {
-      callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Notification)));
+      callback(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Notification)));
     }, (error) => handleFirestoreError(error, 'subscribeToNotifications'));
   },
 
@@ -340,7 +338,6 @@ const ApiService = {
 
   // --- ORDERS ---
 
-  // Added missing getOrders method used in Products and Warehouse pages
   async getOrders(): Promise<Order[]> {
     try {
       const q = query(collection(db, ORDERS_COLLECTION));
@@ -348,7 +345,6 @@ const ApiService = {
       return snapshot.docs.map(doc => {
         const data = doc.data();
         return {
-          id: doc.id,
           orderNumber: data.orderNumber,
           productId: data.productCatalogId,
           quantity: data.targetQuantity,
@@ -359,7 +355,8 @@ const ApiService = {
           createdAt: data.createdAt,
           workCycleId: data.workCycleId,
           workCycleName: data.workCycleName,
-          deleted: data.deleted
+          deleted: data.deleted,
+          id: doc.id // ID last
         } as Order & { deleted?: boolean };
       }).filter(o => !o.deleted);
     } catch (error) {
@@ -374,7 +371,6 @@ const ApiService = {
       callback(snapshot.docs.map(doc => {
         const data = doc.data();
         return {
-          id: doc.id,
           orderNumber: data.orderNumber,
           productId: data.productCatalogId,
           quantity: data.targetQuantity,
@@ -385,7 +381,8 @@ const ApiService = {
           createdAt: data.createdAt,
           workCycleId: data.workCycleId,
           workCycleName: data.workCycleName,
-          deleted: data.deleted
+          deleted: data.deleted,
+          id: doc.id // ID last
         } as Order & { deleted?: boolean };
       }).filter(o => !o.deleted));
     }, (error) => handleFirestoreError(error, 'subscribeToOrders'));
@@ -432,7 +429,7 @@ const ApiService = {
   async getTasks(): Promise<Task[]> {
     try {
       const querySnapshot = await getDocs(collection(db, TASKS_COLLECTION));
-      return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task)).filter((t: any) => !t.deleted);
+      return querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Task)).filter((t: any) => !t.deleted);
     } catch (error) {
       handleFirestoreError(error, 'getTasks');
       return [];
@@ -454,7 +451,6 @@ const ApiService = {
               deadline = new Date(data.dueDate.seconds * 1000).toISOString().split('T')[0];
           }
           return {
-            id: doc.id,
             type: data.type || 'simple',
             title: data.title,
             status: data.status,
@@ -469,7 +465,8 @@ const ApiService = {
             pendingQuantity: data.pendingQuantity || 0,
             deadline: deadline,
             isFinalStage: data.isFinalStage,
-            deleted: data.deleted
+            deleted: data.deleted,
+            id: doc.id // ID Last
           } as Task & { deleted?: boolean };
       }).filter(t => !t.deleted));
     }, (error) => handleFirestoreError(error, 'subscribeToTasks'));
@@ -487,7 +484,7 @@ const ApiService = {
   async saveTask(task: Task): Promise<void> {
     try {
       const usersSnap = await getDocs(query(collection(db, USERS_COLLECTION)));
-      const allUsers = usersSnap.docs.map(d => ({id: d.id, ...d.data()} as User));
+      const allUsers = usersSnap.docs.map(d => ({...d.data(), id: d.id} as User));
       const assignedUsers = allUsers.filter(u => task.assigneeIds.includes(u.id));
       
       const dbTask = {
@@ -540,7 +537,6 @@ const ApiService = {
           return querySnapshot.docs.map(doc => {
                 const data = doc.data();
                 return {
-                    id: doc.id,
                     name: data.name,
                     sku: data.sku,
                     photo: data.photoUrl,
@@ -549,7 +545,8 @@ const ApiService = {
                     description: data.description,
                     deleted: data.deleted,
                     jobCycleId: data.jobCycleId,
-                    drawingId: data.drawingId
+                    drawingId: data.drawingId,
+                    id: doc.id // ID Last
                 } as Product & { deleted?: boolean };
             }).filter(p => !p.deleted);
       } catch (error) {
@@ -558,14 +555,12 @@ const ApiService = {
       }
   },
 
-  // Added missing subscribeToProducts method used in Products page
   subscribeToProducts(callback: (products: Product[]) => void): () => void {
     const q = query(collection(db, CATALOGS_COLLECTION), where("type", "==", "product"));
     return onSnapshot(q, (snapshot) => {
       callback(snapshot.docs.map(doc => {
         const data = doc.data();
         return {
-            id: doc.id,
             name: data.name,
             sku: data.sku,
             photo: data.photoUrl,
@@ -574,7 +569,8 @@ const ApiService = {
             description: data.description,
             deleted: data.deleted,
             jobCycleId: data.jobCycleId,
-            drawingId: data.drawingId
+            drawingId: data.drawingId,
+            id: doc.id // ID Last
         } as Product & { deleted?: boolean };
       }).filter(p => !p.deleted));
     }, (error) => handleFirestoreError(error, 'subscribeToProducts'));
@@ -587,7 +583,7 @@ const ApiService = {
           if (docSnap.exists()) {
               const data = docSnap.data();
               if (data.deleted) return null;
-              return { id: docSnap.id, name: data.name, sku: data.sku, photo: data.photoUrl, colorTag: data.colorTag, unit: data.unit, description: data.description, jobCycleId: data.jobCycleId, drawingId: data.drawingId } as Product;
+              return { ...data, id: docSnap.id } as Product;
           }
           return null;
       } catch (error) {
@@ -628,7 +624,7 @@ const ApiService = {
         const querySnapshot = await getDocs(q);
         return querySnapshot.docs.map(doc => {
             const data = doc.data();
-            return { id: doc.id, name: data.name, photo: data.photoUrl, unit: data.unit || 'pcs', description: data.description, folderId: data.folderId || null, colorTag: data.colorTag } as Tool;
+            return { ...data, id: doc.id, name: data.name, photo: data.photoUrl, unit: data.unit || 'pcs', description: data.description, folderId: data.folderId || null, colorTag: data.colorTag } as Tool;
         });
     } catch (error) {
         handleFirestoreError(error, 'getTools');
@@ -641,7 +637,7 @@ const ApiService = {
     return onSnapshot(q, (snapshot) => {
       callback(snapshot.docs.map(doc => {
         const data = doc.data();
-        return { id: doc.id, name: data.name, photo: data.photoUrl, unit: data.unit || 'pcs', description: data.description, folderId: data.folderId || null, colorTag: data.colorTag } as Tool;
+        return { ...data, id: doc.id, name: data.name, photo: data.photoUrl, unit: data.unit || 'pcs', description: data.description, folderId: data.folderId || null, colorTag: data.colorTag } as Tool;
       }));
     }, (error) => handleFirestoreError(error, 'subscribeToTools'));
   },
@@ -661,15 +657,13 @@ const ApiService = {
     }
   },
 
-  // Added missing subscribeToToolFolders method
   subscribeToToolFolders(type: 'catalog' | 'warehouse' | 'production', callback: (folders: ToolFolder[]) => void): () => void {
     const q = query(collection(db, TOOL_FOLDERS_COLLECTION), where("type", "==", type));
     return onSnapshot(q, (snapshot) => {
-      callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ToolFolder)));
+      callback(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as ToolFolder)));
     }, (error) => handleFirestoreError(error, 'subscribeToToolFolders'));
   },
 
-  // Added missing saveToolFolder method
   async saveToolFolder(folder: ToolFolder): Promise<void> {
     try {
       const data = sanitizeForFirestore(folder);
@@ -684,7 +678,6 @@ const ApiService = {
       try { await deleteDoc(doc(db, TOOL_CATALOG_COLLECTION, id)); } catch (error) { handleFirestoreError(error, 'deleteTool'); throw error; }
   },
 
-  // Added missing deleteToolFolder method used in Tools page
   async deleteToolFolder(id: string): Promise<void> {
       try { await deleteDoc(doc(db, TOOL_FOLDERS_COLLECTION, id)); } catch (error) { handleFirestoreError(error, 'deleteToolFolder'); throw error; }
   },
@@ -744,7 +737,7 @@ const ApiService = {
     return onSnapshot(q, (snapshot) => {
         callback(snapshot.docs.map(doc => {
             const data = doc.data();
-            return { id: doc.id, productId: data.productId || data.catalogId, quantity: data.quantity, productName: data.productName, reason: data.reason, workerName: data.workerName, stageName: data.stageName, date: data.date, imageUrl: data.imageUrl } as DefectItem;
+            return { ...data, id: doc.id, productId: data.productId || data.catalogId, quantity: data.quantity, productName: data.productName, reason: data.reason, workerName: data.workerName, stageName: data.stageName, date: data.date, imageUrl: data.imageUrl } as DefectItem;
         }));
     }, (error) => handleFirestoreError(error, 'subscribeToDefects'));
   },
@@ -752,7 +745,7 @@ const ApiService = {
   subscribeToDefectHistory(callback: (history: any[]) => void): () => void {
     const q = query(collection(db, DEFECT_HISTORY_COLLECTION), orderBy('date', 'desc'));
     return onSnapshot(q, (snapshot) => {
-        callback(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        callback(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })));
     }, (error) => handleFirestoreError(error, 'subscribeToDefectHistory'));
   },
 
@@ -777,7 +770,7 @@ const ApiService = {
     return onSnapshot(q, (snapshot) => {
       callback(snapshot.docs.map(doc => {
         const data = doc.data();
-        return { id: doc.id, ...data } as ProductionReport;
+        return { ...data, id: doc.id } as ProductionReport;
       }));
     }, (error) => handleFirestoreError(error, 'subscribeToReports'));
   },
@@ -896,20 +889,28 @@ const ApiService = {
   async getSetupMaps(): Promise<SetupMap[]> {
       try {
           const snap = await getDocs(collection(db, SETUP_MAPS_COLLECTION));
-          return snap.docs.map(d => ({id: d.id, ...d.data()} as SetupMap));
+          return snap.docs
+            .map(d => ({...d.data(), id: d.id} as SetupMap & { deleted?: boolean })) // Corrected ID spread
+            .filter(m => !m.deleted);
       } catch(e) { return []; }
   },
 
   subscribeToSetupMaps(callback: (maps: SetupMap[]) => void): () => void {
       return onSnapshot(collection(db, SETUP_MAPS_COLLECTION), (snap) => {
-          callback(snap.docs.map(d => ({id: d.id, ...d.data()} as SetupMap)));
+          const maps = snap.docs
+            .map(d => ({...d.data(), id: d.id} as SetupMap & { deleted?: boolean })) // Corrected ID spread
+            .filter(m => !m.deleted);
+          callback(maps);
       });
   },
 
   async getSetupMap(id: string): Promise<SetupMap | null> {
       try {
           const d = await getDoc(doc(db, SETUP_MAPS_COLLECTION, id));
-          return d.exists() ? ({id: d.id, ...d.data()} as SetupMap) : null;
+          if (!d.exists()) return null;
+          const data = d.data() as SetupMap & { deleted?: boolean };
+          if (data.deleted) return null;
+          return {...data, id: d.id}; // Corrected ID spread
       } catch(e) { return null; }
   },
 
@@ -922,7 +923,16 @@ const ApiService = {
   },
 
   async deleteSetupMap(id: string): Promise<void> {
-      try { await deleteDoc(doc(db, SETUP_MAPS_COLLECTION, id)); } catch(e) { throw e; }
+      try { 
+          // Soft delete to allow recovery from trash
+          await updateDoc(doc(db, SETUP_MAPS_COLLECTION, id), { 
+              deleted: true,
+              deletedAt: new Date().toISOString()
+          }); 
+      } catch(e) { 
+          handleFirestoreError(e, 'deleteSetupMap'); 
+          throw e; 
+      }
   },
 
   // --- TRASH ---
@@ -931,7 +941,11 @@ const ApiService = {
       let colName = type === 'task' ? TASKS_COLLECTION : type === 'order' ? ORDERS_COLLECTION : type === 'product' ? CATALOGS_COLLECTION : type === 'cycle' ? WORK_STORAGE_COLLECTION : type === 'setupMap' ? SETUP_MAPS_COLLECTION : '';
       if (!colName) return [];
       let q = type === 'cycle' ? query(collection(db, colName), where("deletedAt", "!=", null)) : query(collection(db, colName), where("deleted", "==", true));
-      try { const snap = await getDocs(q); return snap.docs.map(d => ({id: d.id, ...d.data(), type})); } catch (e) { return []; }
+      try { 
+          const snap = await getDocs(q); 
+          // Corrected order: ID last
+          return snap.docs.map(d => ({...d.data(), id: d.id, type})); 
+      } catch (e) { return []; }
   },
 
   async restoreItem(type: string, id: string): Promise<void> {
