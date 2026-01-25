@@ -271,6 +271,8 @@ export interface SetupMap {
   consumptionRatio?: number; 
   // Multi-Component Logic
   inputComponents?: SetupComponentRequirement[]; 
+  // NEW: Manufacturing vs Assembly toggle
+  processType?: 'manufacturing' | 'assembly';
 }
 
 export type OrderStatus = 'pending' | 'in_progress' | 'completed' | 'canceled' | 'new' | 'done';

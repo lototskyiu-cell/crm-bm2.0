@@ -92,6 +92,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
   const [newMapMachine, setNewMapMachine] = useState('');
   const [newMapProductId, setNewMapProductId] = useState('');
   const [newMapDrawingId, setNewMapDrawingId] = useState('');
+  const [newMapProcessType, setNewMapProcessType] = useState<'manufacturing' | 'assembly'>('assembly');
   const [newMapComponents, setNewMapComponents] = useState<SetupComponentRequirement[]>([]);
   const [newMapBlocks, setNewMapBlocks] = useState<{tempId: string, toolNumber: string, toolName: string, toolId?: string, settings: string}[]>([]);
   
@@ -147,7 +148,6 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
     }
   }, [permsLoading, currentUser, activeMainTab, isSuperAdmin]);
 
-  // ... (Subscriptions remain same) ...
   useEffect(() => {
     let unsubscribeProducts: () => void;
     let unsubscribeStocks: () => void;
@@ -382,7 +382,6 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
     </div>
   );
 
-  // ... (Handlers remain same) ...
   const handleOpenWipModal = (task: Task, mode: 'add' | 'deduct') => {
       setWipSelectedTask(task);
       setWipModalMode(mode);
@@ -585,12 +584,27 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
   };
 
   const handleEditMap = (map: SetupMap) => {
-    setEditingMapId(map.id); setNewMapName(map.name); setNewMapMachine(map.machine); setNewMapProductId(map.productCatalogId || ''); setNewMapDrawingId(map.drawingId || '');
+    setEditingMapId(map.id); 
+    setNewMapName(map.name); 
+    setNewMapMachine(map.machine); 
+    setNewMapProductId(map.productCatalogId || ''); 
+    setNewMapDrawingId(map.drawingId || '');
+    setNewMapProcessType(map.processType || 'assembly');
     if (map.inputComponents && map.inputComponents.length > 0) { setNewMapComponents(map.inputComponents); } else { const ratio = map.consumptionRatio || 1; if (ratio > 1) { setNewMapComponents([{ sourceStageIndex: 0, ratio: ratio }]); } else { setNewMapComponents([]); } }
     const tempBlocks = map.blocks.map(b => ({ tempId: b.id || `b_${Date.now()}_${Math.random()}`, toolNumber: b.toolNumber || '', toolName: b.toolName, toolId: b.toolId, settings: b.settings }));
     setNewMapBlocks(tempBlocks); setIsMapModalOpen(true);
   };
-  const handleOpenMapModal = () => { setEditingMapId(null); setNewMapName(''); setNewMapMachine(''); setNewMapProductId(''); setNewMapDrawingId(''); setNewMapComponents([]); setNewMapBlocks([]); setIsMapModalOpen(true); };
+  const handleOpenMapModal = () => { 
+    setEditingMapId(null); 
+    setNewMapName(''); 
+    setNewMapMachine(''); 
+    setNewMapProductId(''); 
+    setNewMapDrawingId(''); 
+    setNewMapProcessType('assembly');
+    setNewMapComponents([]); 
+    setNewMapBlocks([]); 
+    setIsMapModalOpen(true); 
+  };
   
   const addComponentRequirement = () => { 
       setNewMapComponents([...newMapComponents, { sourceStageIndex: 0, ratio: 1, name: '', qty: 1 }]); 
@@ -627,7 +641,8 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
         drawingUrl: selectedDrawing?.photo, 
         drawingName: selectedDrawing?.name, 
         programNumber: null, 
-        inputComponents: cleanComponents 
+        inputComponents: cleanComponents,
+        processType: newMapProcessType
     };
     
     try { await API.saveSetupMap(mapData); setIsMapModalOpen(false); } catch(e: any) { alert(`Error: ${e.message}`); } finally { setIsUploading(false); }
@@ -938,6 +953,9 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                                                     <div className="text-sm text-gray-500 mt-1">
                                                         <span className="flex items-center"><Wrench size={14} className="mr-1"/> Верстат: <span className="font-bold text-gray-800 ml-1">{map.machine}</span></span>
                                                         {linkedProduct && (<span className="flex items-center mt-1"><Box size={14} className="mr-1"/> Виріб: <span className="font-bold text-blue-600 ml-1">{linkedProduct.name}</span></span>)}
+                                                        <span className={`flex items-center mt-1 text-[10px] font-black uppercase ${map.processType === 'manufacturing' ? 'text-blue-600' : 'text-gray-400'}`}>
+                                                          {map.processType === 'manufacturing' ? 'Виготовлення' : 'Збірка'}
+                                                        </span>
                                                     </div>
                                                 </div>
                                                 <div className="flex flex-col items-end gap-2">
@@ -969,7 +987,6 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                 )}
             </>
         ) : activeMainTab === 'wip' && (isSuperAdmin || canView('products_wip')) ? (
-            // ... (WIP Content)
             <div className="flex-1 flex flex-col animate-fade-in">
                 <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm mb-6 flex gap-4">
                     <div className="relative flex-1">
@@ -1362,6 +1379,20 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                                   onChange={setNewMapDrawingId}
                                   placeholder="Оберіть креслення..."
                               />
+                          </div>
+                      </div>
+
+                      <div className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Тип процесу</label>
+                          <div className="flex gap-4">
+                              <label className="flex items-center cursor-pointer">
+                                  <input type="radio" name="processType" className="w-4 h-4 text-blue-600" checked={newMapProcessType === 'manufacturing'} onChange={() => setNewMapProcessType('manufacturing')} />
+                                  <span className="ml-2 text-sm font-medium">Виготовлення (Перший етап)</span>
+                              </label>
+                              <label className="flex items-center cursor-pointer">
+                                  <input type="radio" name="processType" className="w-4 h-4 text-blue-600" checked={newMapProcessType === 'assembly'} onChange={() => setNewMapProcessType('assembly')} />
+                                  <span className="ml-2 text-sm font-medium">Збірка (Вимагає компоненти)</span>
+                              </label>
                           </div>
                       </div>
 

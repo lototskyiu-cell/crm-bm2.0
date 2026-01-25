@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
 import { API } from '../services/api';
 import { store } from '../services/mockStore'; 
-import { Task, ProductionReport, User, Order } from '../types';
-import { CheckCircle, AlertCircle, FileText, Plus, Search, X, Download, ArrowRight, CheckSquare, Square, Pencil, Loader, Save, Link, Package, ClipboardCheck } from 'lucide-react';
+import { Task, ProductionReport, User, Order, SetupMap } from '../types';
+// Add missing 'Check' component to imports from 'lucide-react'
+import { Check, CheckCircle, AlertCircle, FileText, Plus, Search, X, Download, ArrowRight, CheckSquare, Square, Pencil, Loader, Save, Link, Package, ClipboardCheck } from 'lucide-react';
 import { collection, query, where, getDocs, writeBatch, doc, increment, serverTimestamp, getDoc, updateDoc, addDoc } from "firebase/firestore";
 import { db } from "../services/firebase";
 
@@ -38,6 +38,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
   // Derived State for Task Type
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
   const isSimpleTask = selectedTask?.type === 'simple';
+  const [activeSetupMap, setActiveSetupMap] = useState<SetupMap | null>(null);
 
   // Consumption Logic State
   const [consumptionGroups, setConsumptionGroups] = useState<ConsumptionGroup[]>([]);
@@ -80,14 +81,13 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
 
   // --- LOGIC TO FETCH FROM setup_cards ---
   useEffect(() => {
-      if (isSimpleTask) {
+      if (isSimpleTask || !selectedTaskId) {
           setConsumptionGroups([]);
+          setActiveSetupMap(null);
           return;
       }
 
       const calculateConsumption = async () => {
-          setConsumptionGroups([]); 
-
           const task = tasks.find(t => t.id === selectedTaskId);
           const order = orders.find(o => o.id === task?.orderId);
           const selectedProduct = order ? { id: order.productId } : undefined;
@@ -105,7 +105,9 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
 
               if (!snapshot.empty) {
                   const cardData = snapshot.docs[0].data();
-                  const d = cardData as any;
+                  const d = { id: snapshot.docs[0].id, ...cardData } as SetupMap;
+                  setActiveSetupMap(d);
+
                   const components = d.inputComponents || [];
 
                   if (components.length > 0) {
@@ -136,6 +138,8 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                           });
                       }
                       setConsumptionGroups(groups);
+                  } else {
+                      setConsumptionGroups([]);
                   }
               }
           } catch (error) {
@@ -175,18 +179,13 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
     const currentTask = tasks.find(t => t.id === selectedTaskId);
     const currentOrder = currentTask?.orderId ? orders.find(o => o.id === currentTask.orderId) : null;
     
-    // Validate Quantity only for production tasks
-    if (!isSimpleTask && !qty) {
-        alert("Введіть кількість для виробничого завдання!");
-        return;
-    }
+    // Safety: Check if manufacturing to unblock first stage
+    const isManufacturing = activeSetupMap?.processType === 'manufacturing';
 
-    // Validate Consumption
-    for (const group of consumptionGroups) {
-        if (group.selectedTotal < group.totalNeeded) {
-            alert(`Недостатньо матеріалів: "${group.name}"!\nПотрібно: ${group.totalNeeded}\nОбрано: ${group.selectedTotal}\n\nБудь ласка, виберіть необхідну кількість партій.`);
-            return;
-        }
+    // Validate Quantity only for production tasks
+    if (!isSimpleTask && (!qty || Number(qty) <= 0)) {
+        alert("Введіть кількість виробленої продукції!");
+        return;
     }
 
     setIsSubmitting(true);
@@ -238,8 +237,8 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
             }
         }
 
-        // --- 3. CONSUME MATERIALS ---
-        if (!isSimpleTask && consumptionGroups.length > 0) {
+        // --- 3. CONSUME MATERIALS (Only if batches selected) ---
+        if (allSourceBatchIds.length > 0) {
             const batchWrite = writeBatch(db);
             for (const group of consumptionGroups) {
                 let remainingToConsume = group.totalNeeded;
@@ -273,8 +272,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
             'Новий звіт'
         );
 
-        alert(isSimpleTask ? "Звіт відправлено на перевірку!" : `Звіт збережено!\nПрогрес завдання: +${qtyNumber} (Очікує підтвердження).`);
-
         // Reset Form
         setIsFormOpen(false);
         setSelectedTaskId('');
@@ -283,6 +280,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
         setNote('');
         setBatchCode('');
         setConsumptionGroups([]);
+        setActiveSetupMap(null);
 
     } catch (e: any) {
         alert(`Помилка: ${e.message}`);
@@ -306,7 +304,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
       let matchesSearch = true;
       if (historySearch) {
         const term = historySearch.toLowerCase();
-        const tTitle = r.taskTitle || tasks.find(t => t.id === r.taskId)?.title || '';
+        const tTitle = r.taskTitle || tasks.find(t => t.id === r.taskId)?.title || 'Deleted Task';
         const oNum = r.orderNumber || (tasks.find(t => t.id === r.taskId)?.orderId ? orders.find(o => o.id === tasks.find(t => t.id === r.taskId)?.orderId)?.orderNumber : '') || '';
         const user = allUsers.find(u => u.id === r.userId);
         matchesSearch = 
@@ -443,6 +441,8 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
   };
 
   if (currentUser && currentUser.role === 'worker') {
+    const isManufacturing = activeSetupMap?.processType === 'manufacturing';
+
     return (
       <div className="p-8">
         <div className="flex justify-between items-center mb-8">
@@ -450,7 +450,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
              <h1 className="text-2xl font-bold text-gray-900">Щоденні звіти</h1>
              <p className="text-gray-500">Подати звіт про виконану роботу</p>
           </div>
-          <button onClick={() => setIsFormOpen(true)} className="bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center shadow-lg hover:bg-slate-800">
+          <button onClick={() => setIsFormOpen(true)} className="bg-slate-900 text-white px-4 py-2 rounded-lg flex items-center shadow-lg hover:bg-slate-800 transition-transform active:scale-95">
             <Plus size={20} className="mr-2"/> Сформувати звіт
           </button>
         </div>
@@ -458,16 +458,15 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
            <div className="bg-gray-50 px-6 py-4 border-b font-bold text-gray-700">Моя історія звітів</div>
            <div className="divide-y divide-gray-100">
-             {reports.filter(r => r.userId === currentUser.id).map(report => {
+             {reports.filter(r => r.userId === currentUser.id).slice(0, 15).map(report => {
                const taskTitle = report.taskTitle || tasks.find(t => t.id === report.taskId)?.title || 'Deleted Task';
                const orderNum = report.orderNumber || (tasks.find(t => t.id === report.taskId)?.orderId ? orders.find(o => o.id === tasks.find(t => t.id === report.taskId)?.orderId)?.orderNumber : null);
                return (
-                 <div key={report.id} className="p-4 flex items-center justify-between">
+                 <div key={report.id} className="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
                     <div>
                        {report.batchCode && report.batchCode !== '-' ? <div className="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded w-fit mb-1">{report.batchCode}</div> : orderNum && report.orderNumber !== 'Simple Task' && <div className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded w-fit mb-1">{orderNum}</div>}
                        <div className="font-bold text-gray-900">{taskTitle}</div>
                        <div className="text-sm text-gray-500">{new Date(report.createdAt).toLocaleString('uk-UA')}</div>
-                       {report.notes && <div className="text-xs text-gray-400 mt-1 italic">"{report.notes}"</div>}
                     </div>
                     <div className="text-right flex items-center gap-4">
                        {report.type !== 'simple_report' ? (
@@ -495,7 +494,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                    <div>
                       <label className="block text-sm font-bold text-gray-700 mb-1">Оберіть завдання</label>
                       <select 
-                        className="w-full p-3 border rounded-lg bg-gray-50"
+                        className="w-full p-3 border rounded-lg bg-gray-50 font-bold"
                         value={selectedTaskId}
                         onChange={e => setSelectedTaskId(e.target.value)}
                       >
@@ -503,7 +502,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                         {myActiveTasks.map(t => (
                           <option key={t.id} value={t.id}>
                              [{t.type === 'simple' ? 'ПРОСТЕ' : 'ВИРОБН.'}] {t.title} 
-                             {t.type === 'production' && ` (Залишилось: ${(t.plannedQuantity || 0) - (t.completedQuantity || 0)})`}
                           </option>
                         ))}
                       </select>
@@ -515,10 +513,10 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                             <label className="block text-sm font-bold text-gray-700 mb-1">Номер партії / Зміна</label>
                             <input 
                                 type="text" 
-                                className="w-full p-3 border rounded-lg bg-white"
+                                className="w-full p-3 border rounded-lg bg-white font-bold"
                                 value={batchCode}
                                 onChange={e => setBatchCode(e.target.value)}
-                                placeholder="Напр. П-1 або Нічна"
+                                placeholder={isManufacturing ? "Введіть номер партії вручну..." : "Напр. П-1 або Нічна"}
                             />
                         </div>
 
@@ -527,7 +525,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                                 <label className="block text-sm font-bold text-gray-700 mb-1">Вироблено (шт)</label>
                                 <input 
                                 type="number" 
-                                className="w-full p-3 border rounded-lg"
+                                className="w-full p-3 border rounded-lg font-black text-xl"
                                 value={qty}
                                 onChange={e => setQty(e.target.value)}
                                 />
@@ -536,31 +534,31 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                                 <label className="block text-sm font-bold text-red-600 mb-1">Брак (шт)</label>
                                 <input 
                                 type="number" 
-                                className="w-full p-3 border rounded-lg border-red-100 bg-red-50"
+                                className="w-full p-3 border rounded-lg border-red-100 bg-red-50 text-red-700 font-bold"
                                 value={scrap}
                                 onChange={e => setScrap(e.target.value)}
                                 />
                             </div>
                         </div>
 
-                        {consumptionGroups.length > 0 && Number(qty) > 0 && (
+                        {/* ТІЛЬКИ ЯКЩО НЕ ВИГОТОВЛЕННЯ ТА Є ПАРТІЇ ДЛЯ ВИБОРУ */}
+                        {!isManufacturing && consumptionGroups.some(g => g.availableBatches.length > 0) && Number(qty) > 0 && (
                             <div className="space-y-3 animate-fade-in">
-                                {consumptionGroups.map((group, gIdx) => (
-                                    <div key={gIdx} className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                                        <div className="flex justify-between items-center mb-2">
-                                            <label className="text-xs font-bold text-blue-800 uppercase flex items-center">
-                                                <Package size={12} className="mr-1"/> Збірка: {group.name}
-                                            </label>
-                                            <span className={`text-xs font-bold ${group.selectedTotal >= group.totalNeeded ? 'text-green-600' : 'text-red-500'}`}>
-                                                Обрано: {group.selectedTotal} / {group.totalNeeded}
-                                            </span>
-                                        </div>
-                                        
-                                        <div className="max-h-24 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
-                                            {group.availableBatches.length === 0 ? (
-                                                <div className="text-xs text-red-500 italic">Немає доступних партій!</div>
-                                            ) : (
-                                                group.availableBatches.map(batch => {
+                                {consumptionGroups.map((group, gIdx) => {
+                                    if (group.availableBatches.length === 0) return null; // Приховуємо блоки без партій
+                                    return (
+                                        <div key={gIdx} className="bg-blue-50 p-3 rounded-lg border border-blue-100 shadow-sm">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <label className="text-xs font-bold text-blue-800 uppercase flex items-center">
+                                                    <Package size={12} className="mr-1"/> Збірка: {group.name}
+                                                </label>
+                                                <span className={`text-[10px] font-black ${group.selectedTotal >= group.totalNeeded ? 'text-green-600' : 'text-blue-600'}`}>
+                                                    Обрано: {group.selectedTotal} / {group.totalNeeded}
+                                                </span>
+                                            </div>
+                                            
+                                            <div className="max-h-24 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                                                {group.availableBatches.map(batch => {
                                                     const available = batch.quantity - (batch.usedQuantity || 0);
                                                     const isSelected = group.selectedBatchIds.has(batch.id);
                                                     const user = allUsers.find(u => u.id === batch.userId);
@@ -569,48 +567,51 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                                                         <div 
                                                             key={batch.id} 
                                                             onClick={() => toggleBatchSelection(gIdx, batch.id)}
-                                                            className={`p-2 rounded border text-xs cursor-pointer flex justify-between items-center transition-colors ${isSelected ? 'bg-blue-200 border-blue-300' : 'bg-white border-gray-200 hover:bg-blue-50'}`}
+                                                            className={`p-2 rounded border text-[10px] cursor-pointer flex justify-between items-center transition-all ${isSelected ? 'bg-blue-600 border-blue-600 text-white font-bold' : 'bg-white border-gray-200 hover:bg-blue-50'}`}
                                                         >
-                                                            <div className="flex items-center">
-                                                                <div className={`w-3 h-3 rounded border mr-2 flex items-center justify-center ${isSelected ? 'bg-blue-600 border-blue-600' : 'bg-white border-gray-300'}`}>
-                                                                    {isSelected && <CheckSquare size={8} className="text-white"/>}
+                                                            <div className="flex items-center truncate">
+                                                                <div className={`w-3 h-3 rounded border mr-2 flex items-center justify-center shrink-0 ${isSelected ? 'bg-white border-white' : 'bg-white border-gray-300'}`}>
+                                                                    {isSelected && <Check size={8} className="text-blue-600"/>}
                                                                 </div>
-                                                                <div>
-                                                                    <span className="font-bold text-gray-700">
-                                                                        {batch.type === 'manual_stock' ? 'Склад (Admin)' : user?.lastName || 'Unknown'}
-                                                                    </span>
-                                                                    <span className="text-gray-400 ml-1">
-                                                                        {new Date(batch.createdAt).toLocaleDateString()}
-                                                                    </span>
-                                                                </div>
+                                                                <span className="truncate">{batch.batchCode || user?.lastName || 'Партія'}</span>
                                                             </div>
-                                                            <span className="font-mono font-bold">{available} шт</span>
+                                                            <span className="font-mono font-bold ml-2 shrink-0">{available} шт</span>
                                                         </div>
                                                     );
-                                                })
-                                            )}
+                                                })}
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
+                        )}
+
+                        {isManufacturing && (
+                          <div className="bg-green-50 p-3 rounded-lg border border-green-100 flex items-start animate-fade-in shadow-sm">
+                            <CheckCircle className="text-green-600 mr-2 shrink-0" size={16}/>
+                            <div>
+                              <p className="text-xs font-bold text-green-900">Виготовлення (Перший етап)</p>
+                              <p className="text-[10px] text-green-700">Вхідні компоненти не потрібні. Звіт не блокується.</p>
+                            </div>
+                          </div>
                         )}
                       </div>
                    )}
 
                    {isSimpleTask && (
-                      <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 flex items-start animate-fade-in">
+                      <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 flex items-start animate-fade-in shadow-sm">
                           <ClipboardCheck className="text-blue-600 mr-3 shrink-0" size={24}/>
                           <div>
                               <p className="text-sm font-bold text-blue-900">Просте завдання</p>
-                              <p className="text-xs text-blue-700 mt-1">Це завдання не потребує введення кількості. Ви можете просто залишити коментар про виконання.</p>
+                              <p className="text-xs text-blue-700 mt-1">Ця операція не потребує обліку кількості деталей.</p>
                           </div>
                       </div>
                    )}
 
                    <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-1">Нотатка / Коментар {isSimpleTask ? '(обов\'язково для пояснення)' : '(опціонально)'}</label>
+                      <label className="block text-sm font-bold text-gray-700 mb-1">Нотатка / Коментар (опціонально)</label>
                       <textarea 
-                        className="w-full p-3 border rounded-lg h-24 resize-none outline-none focus:ring-2 focus:ring-slate-500"
+                        className="w-full p-3 border rounded-lg h-20 resize-none outline-none focus:ring-2 focus:ring-slate-500"
                         placeholder="Опишіть що було зроблено..."
                         value={note}
                         onChange={e => setNote(e.target.value)}
@@ -622,7 +623,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                    <button 
                      onClick={handleSubmit} 
                      disabled={isSubmitting || !selectedTaskId}
-                     className="flex-1 py-3 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 disabled:opacity-50 flex justify-center items-center transition-all shadow-lg"
+                     className="flex-1 py-3 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 disabled:opacity-50 flex justify-center items-center transition-all shadow-lg active:scale-95"
                    >
                      {isSubmitting ? <Loader size={16} className="animate-spin"/> : 'Відправити звіт'}
                    </button>
@@ -675,18 +676,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                       </div>
                    </div>
                    {report.notes && <div className="bg-gray-50 p-2 rounded text-sm text-gray-600 mb-3 ml-2 italic border border-gray-100">"{report.notes}"</div>}
-                   
-                   {report.sourceBatchIds && report.sourceBatchIds.length > 0 && (
-                       <div className="mb-3 ml-2">
-                           <div className="text-[10px] text-gray-400 uppercase font-bold mb-1 flex items-center"><Link size={10} className="mr-1"/> Збірка з партій:</div>
-                           <div className="flex flex-wrap gap-1">
-                               {report.sourceBatchIds.map(sid => (
-                                   <span key={sid} className="text-[10px] bg-blue-50 text-blue-700 px-1.5 rounded border border-blue-100">#{sid.slice(-4)}</span>
-                               ))}
-                           </div>
-                       </div>
-                   )}
-
                    <div className="flex gap-2 ml-2 mt-2">
                       <button onClick={() => handleApprove(report)} className="flex-1 bg-green-500 hover:bg-green-600 text-white py-2 rounded-lg text-sm font-bold transition-colors shadow-sm">Затвердити</button>
                       <button onClick={() => handleReject(report)} className="flex-1 bg-white border border-red-100 text-red-500 hover:bg-red-50 py-2 rounded-lg text-sm font-bold transition-colors">Відхилити</button>
