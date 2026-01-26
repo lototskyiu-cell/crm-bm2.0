@@ -107,19 +107,19 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                               r.status === 'approved' &&
                               r.orderNumber === order.orderNumber &&
                               (r.stageName?.trim() === compName?.trim() || r.taskTitle?.trim() === compName?.trim())
-                          ).map(reportItem => {
+                          ).map((reportItem: ProductionReport) => {
                               // 🛠 SMART AVAILABLE CALCULATION: 
                               // Subtract both officially approved usedQuantity AND pending consumptions from other reports
-                              // Renamed variables to avoid shadowing and ensured targetId is correctly inferred as string
-                              const targetId = reportItem.id;
+                              // Added explicit string type to targetId to fix index type error (Line 195 fix)
+                              const targetId: string = reportItem.id;
                               const pendingUsed = reports
-                                .filter(other => {
+                                .filter((other: ProductionReport) => {
                                   // Access sourceConsumption safely by explicitly casting to a string-keyed record
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
                                   // Use the narrowed string key for index access
                                   return other.status === 'pending' && !!consumption && consumption[targetId] !== undefined;
                                 })
-                                .reduce((sum, other) => {
+                                .reduce((sum: number, other: ProductionReport) => {
                                   // Access sourceConsumption safely by explicitly casting to a string-keyed record
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
                                   // Use the narrowed string key for indexing
