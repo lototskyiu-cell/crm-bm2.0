@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { MobileHeader } from './components/MobileHeader';
@@ -18,6 +17,7 @@ import { Reports } from './pages/Reports';
 import { Tools } from './pages/Tools'; 
 import { User } from './types';
 import { NotificationBell } from './components/NotificationBell';
+import { BirthdayManager } from './components/BirthdayManager';
 import { API } from './services/api';
 import { ThemeProvider } from './context/ThemeContext';
 
@@ -169,6 +169,7 @@ const AppContent: React.FC = () => {
   if (isMobile) {
       return (
         <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-slate-900 transition-colors duration-300">
+            <BirthdayManager currentUser={currentUser} />
             <MobileHeader 
                 currentUser={currentUser} 
                 onNavigate={handleNavigate}
@@ -193,6 +194,7 @@ const AppContent: React.FC = () => {
   // --- DESKTOP LAYOUT ---
   return (
     <div className="flex min-h-screen relative bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
+      <BirthdayManager currentUser={currentUser} />
       <Sidebar 
         currentUser={currentUser} 
         currentPath={currentPath}

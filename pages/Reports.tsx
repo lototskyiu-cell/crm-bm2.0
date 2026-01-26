@@ -111,17 +111,20 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                               // 🛠 SMART AVAILABLE CALCULATION: 
                               // Subtract both officially approved usedQuantity AND pending consumptions from other reports
                               // FIX: Explicitly access the dictionary using targetId as a string key to fix TS unknown index error
-                              const targetId = String(r.id);
+                              const targetId: string = r.id;
                               const pendingUsed = reports
                                 .filter(other => {
                                   // Fix: Access sourceConsumption safely by explicitly casting to a string-keyed record
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
-                                  return other.status === 'pending' && consumption && consumption[targetId];
+                                  // Added explicit string cast to resolve "unknown" index type error
+                                  return other.status === 'pending' && consumption && consumption[targetId as string] !== undefined;
                                 })
                                 .reduce((sum, other) => {
                                   // Fix: Cast sourceConsumption to avoid 'unknown' index type error
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
-                                  return sum + (consumption?.[targetId] || 0);
+                                  // Added explicit string cast to resolve indexing error
+                                  const val = consumption ? consumption[targetId as string] || 0 : 0;
+                                  return sum + val;
                                 }, 0);
                               
                               return {
