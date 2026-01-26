@@ -113,8 +113,13 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                               // FIX: Explicitly access the dictionary using targetId as a string key to fix TS unknown index error
                               const targetId = String(r.id);
                               const pendingUsed = reports
-                                .filter(other => other.status === 'pending' && other.sourceConsumption && (other.sourceConsumption as Record<string, number>)[targetId])
+                                .filter(other => {
+                                  // Fix: Access sourceConsumption safely by explicitly casting to a string-keyed record
+                                  const consumption = other.sourceConsumption as Record<string, number> | undefined;
+                                  return other.status === 'pending' && consumption && consumption[targetId];
+                                })
                                 .reduce((sum, other) => {
+                                  // Fix: Cast sourceConsumption to avoid 'unknown' index type error
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
                                   return sum + (consumption?.[targetId] || 0);
                                 }, 0);

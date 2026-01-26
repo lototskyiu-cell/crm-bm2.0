@@ -43,17 +43,26 @@ const handleFirestoreError = (error: any, context: string) => {
   console.error(`Firestore Error (${context}):`, error);
   if (error.code === 'permission-denied') console.warn("⚠️ PERMISSION DENIED");
   if (error.code === 'failed-precondition' && error.message.includes('requires an index')) console.warn(`Developer Action Required: Create Firestore Index for '${context}'.`);
+  if (error.code === 'unavailable') console.warn("⚠️ Firestore service is unavailable (Offline)");
   return null; 
 };
 
+/**
+ * Ensures objects sent to Firestore contain no 'undefined' values.
+ * Firestore throws errors on undefined; it expects null or a value.
+ */
 const sanitizeForFirestore = (obj: any) => {
-  return JSON.parse(JSON.stringify(obj));
+  return JSON.parse(JSON.stringify(obj, (key, value) => 
+    value === undefined ? null : value
+  ));
 };
 
 const ApiService = {
   async verifyAdmin(loginInput: string, passwordInput: string): Promise<boolean> {
     try {
       const docRef = doc(db, 'settings', 'global');
+      // If offline, getDoc might fail if not in cache. 
+      // We try to fetch with a timeout-like behavior or handle the exception.
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -61,8 +70,10 @@ const ApiService = {
       } else {
         return loginInput === 'Admin' && passwordInput === 'Admin';
       }
-    } catch (error) {
+    } catch (error: any) {
       handleFirestoreError(error, 'verifyAdmin');
+      // Fallback for first-run or dev mode if offline
+      if (loginInput === 'Admin' && passwordInput === 'Admin') return true;
       return false;
     }
   },
@@ -173,7 +184,7 @@ const ApiService = {
     } catch (error: any) {
       if (error.message.includes("Користувача") || error.message.includes("пароль")) throw error;
       handleFirestoreError(error, 'login');
-      throw new Error("Помилка при вході в систему");
+      throw new Error("Помилка при вході в систему (перевірте інтернет)");
     }
   },
 
@@ -252,7 +263,7 @@ const ApiService = {
       if (linkId) payload.linkId = linkId;
       if (target) payload.target = target;
       if (title) payload.title = title;
-      await addDoc(collection(db, NOTIFICATIONS_COLLECTION), payload);
+      await addDoc(collection(db, NOTIFICATIONS_COLLECTION), sanitizeForFirestore(payload));
     } catch (error) {
       handleFirestoreError(error, 'sendNotification');
     }
@@ -504,8 +515,8 @@ const ApiService = {
   async saveDrawing(drawing: Drawing): Promise<void> {
     try {
       const data = { name: drawing.name, photoUrl: drawing.photo };
-      if (drawing.id && !drawing.id.startsWith('dwg_temp')) await setDoc(doc(db, DRAWINGS_COLLECTION, drawing.id), data, { merge: true });
-      else await addDoc(collection(db, DRAWINGS_COLLECTION), data);
+      if (drawing.id && !drawing.id.startsWith('dwg_temp')) await setDoc(doc(db, DRAWINGS_COLLECTION, drawing.id), sanitizeForFirestore(data), { merge: true });
+      else await addDoc(collection(db, DRAWINGS_COLLECTION), sanitizeForFirestore(data));
     } catch (error) {
       handleFirestoreError(error, 'saveDrawing');
       throw error;
@@ -551,13 +562,13 @@ const ApiService = {
   },
 
   async addDefect(productId: string, quantity: number): Promise<void> {
-      try { await addDoc(collection(db, DEFECTS_COLLECTION), { productId, quantity, date: serverTimestamp(), reason: "Manual Addition" }); } catch (error) { handleFirestoreError(error, 'addDefect'); throw error; }
+      try { await addDoc(collection(db, DEFECTS_COLLECTION), sanitizeForFirestore({ productId, quantity, date: serverTimestamp(), reason: "Manual Addition" })); } catch (error) { handleFirestoreError(error, 'addDefect'); throw error; }
   },
 
   async scrapDefect(id: string, quantity: number, historyData?: any): Promise<void> {
       try {
           await updateDoc(doc(db, DEFECTS_COLLECTION, id), { quantity: increment(-quantity) });
-          if (historyData) await addDoc(collection(db, DEFECT_HISTORY_COLLECTION), historyData);
+          if (historyData) await addDoc(collection(db, DEFECT_HISTORY_COLLECTION), sanitizeForFirestore(historyData));
       } catch (error) { handleFirestoreError(error, 'scrapDefect'); throw error; }
   },
 
@@ -569,15 +580,13 @@ const ApiService = {
   },
 
   async updateReport(id: string, data: Partial<ProductionReport>): Promise<void> {
-      try { await updateDoc(doc(db, REPORTS_COLLECTION, id), data); } catch(e) { throw e; }
+      try { await updateDoc(doc(db, REPORTS_COLLECTION, id), sanitizeForFirestore(data)); } catch(e) { throw e; }
   },
 
-  // 🛠 IMPROVED APPROVAL: Finalizes component consumption and final product stocking
   async approveReport(id: string, report: ProductionReport): Promise<void> {
       try {
           const batch = writeBatch(db);
 
-          // 1. Mark report as approved
           batch.update(doc(db, REPORTS_COLLECTION, id), { status: 'approved' });
           
           const taskRef = doc(db, TASKS_COLLECTION, report.taskId);
@@ -588,7 +597,6 @@ const ApiService = {
             const newFact = (taskData.factQuantity || 0) + report.quantity;
             const plan = taskData.planQuantity || 0;
             
-            // 2. Update task quantities
             batch.update(taskRef, {
                 factQuantity: increment(report.quantity),
                 pendingQuantity: increment(-report.quantity),
@@ -596,7 +604,6 @@ const ApiService = {
                 updatedAt: serverTimestamp()
             });
 
-            // 3. Official Consumption: Update source batches if they were used
             if (report.sourceConsumption) {
                 Object.entries(report.sourceConsumption).forEach(([sourceBatchId, qty]) => {
                     batch.update(doc(db, REPORTS_COLLECTION, sourceBatchId), {
@@ -605,13 +612,11 @@ const ApiService = {
                 });
             }
 
-            // 4. Final Stage Logic: Move to Warehouse
             if (taskData.isFinalStage && taskData.orderId) {
                 const orderSnap = await getDoc(doc(db, ORDERS_COLLECTION, taskData.orderId));
                 if (orderSnap.exists()) {
                     const productId = orderSnap.data().productCatalogId;
                     
-                    // Update Warehouse Stocks
                     const whQuery = query(collection(db, WAREHOUSE_PRODUCTS_COLLECTION), where("catalogId", "==", productId));
                     const whSnap = await getDocs(whQuery);
                     
@@ -619,26 +624,25 @@ const ApiService = {
                         batch.update(whSnap.docs[0].ref, { quantity: increment(report.quantity) });
                     } else {
                         const newWhRef = doc(collection(db, WAREHOUSE_PRODUCTS_COLLECTION));
-                        batch.set(newWhRef, {
+                        batch.set(newWhRef, sanitizeForFirestore({
                             catalogId: productId,
                             quantity: report.quantity,
                             minQuantity: 0,
                             folder: null
-                        });
+                        }));
                     }
                 }
             }
 
-            // 5. Defect Handling
             if (report.scrapQuantity > 0) {
                 const newDefectRef = doc(collection(db, DEFECTS_COLLECTION));
-                batch.set(newDefectRef, {
+                batch.set(newDefectRef, sanitizeForFirestore({
                     productId: report.productName || 'unknown',
                     quantity: report.scrapQuantity,
                     reason: report.notes || "Виявлено під час виробництва",
                     date: serverTimestamp(),
                     stageName: report.stageName || taskData.title,
-                });
+                }));
             }
           }
           
@@ -676,7 +680,7 @@ const ApiService = {
   },
 
   async updateWorkStorageItem(id: string, item: Partial<JobFolder | JobCycle>): Promise<void> {
-      await updateDoc(doc(db, WORK_STORAGE_COLLECTION, id), item);
+      await updateDoc(doc(db, WORK_STORAGE_COLLECTION, id), sanitizeForFirestore(item));
   },
 
   async deleteWorkStorageItem(id: string): Promise<void> {

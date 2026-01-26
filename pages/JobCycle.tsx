@@ -92,7 +92,7 @@ export const JobCyclePage: React.FC<JobCycleProps> = ({ cycleId, onBack, role })
           await API.updateWorkStorageItem(updatedCycle.id, updatedCycle);
       } catch (e) {
           console.error("Failed to save cycle", e);
-          alert("Error saving changes");
+          alert("Error saving changes (offline?)");
       }
   };
 
@@ -104,7 +104,7 @@ export const JobCyclePage: React.FC<JobCycleProps> = ({ cycleId, onBack, role })
     const updated = {
         ...cycle,
         productId: product ? product.id : '',
-        productPhoto: product ? product.photo : undefined
+        productPhoto: product ? product.photo : null // Fix: Use null instead of undefined for Firestore
     };
     saveCycleChanges(updated);
   };
@@ -145,7 +145,7 @@ export const JobCyclePage: React.FC<JobCycleProps> = ({ cycleId, onBack, role })
             count: newStage.count!,
             responsible: newStage.responsible!,
             notes: newStage.notes!,
-            setupMapId: newStage.setupMapId
+            setupMapId: newStage.setupMapId || null
         } : s);
     } else {
         const stage: JobStage = {
@@ -156,7 +156,7 @@ export const JobCyclePage: React.FC<JobCycleProps> = ({ cycleId, onBack, role })
             count: newStage.count || 1,
             responsible: newStage.responsible || ['Робітник'],
             notes: newStage.notes || '',
-            setupMapId: newStage.setupMapId
+            setupMapId: newStage.setupMapId || undefined // Will be sanitized to null if undefined
         };
         updatedStages = [...cycle.stages, stage];
     }
