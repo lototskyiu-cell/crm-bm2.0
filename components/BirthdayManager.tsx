@@ -116,16 +116,19 @@ export const BirthdayManager: React.FC<BirthdayManagerProps> = ({ currentUser })
                 <p>Бажаємо вам професійного зростання, стабільності, впевненості у завтрашньому дні та нових досягнень.</p>
                 <p>Нехай робота приносить задоволення, а кожен новий рік відкриває ще більше можливостей.</p>
               </div>
-              <div className="mt-14 pt-10 border-t border-white/5">
-                <p className="text-gray-400 font-bold uppercase tracking-widest text-xs mb-2">З повагою,</p>
-                <p className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">Команда CRM BM</p>
-              </div>
               
+              <div className="mt-12 pt-8 border-t border-white/10">
+                <p className="text-lg text-gray-300">З повагою,</p>
+                <p className="text-2xl font-bold text-yellow-400 mt-2 tracking-wider uppercase">
+                  Команда УЛЬТРАКОНТАКТ
+                </p>
+              </div>
+
               <button 
                 onClick={handleClosePersonal} 
-                className="mt-12 px-8 py-3 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 text-gray-400 hover:text-white transition-all flex items-center mx-auto gap-2 text-sm font-bold"
+                className="mt-10 px-6 py-2 bg-white/10 rounded-full hover:bg-white/20 transition-colors"
               >
-                ЗАКРИТИ <X size={16} />
+                Дякую, закрити ✕
               </button>
 
               {/* YouTube Audio Hook */}

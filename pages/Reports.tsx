@@ -107,29 +107,29 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                               r.status === 'approved' &&
                               r.orderNumber === order.orderNumber &&
                               (r.stageName?.trim() === compName?.trim() || r.taskTitle?.trim() === compName?.trim())
-                          ).map(r => {
+                          ).map(reportItem => {
                               // 🛠 SMART AVAILABLE CALCULATION: 
                               // Subtract both officially approved usedQuantity AND pending consumptions from other reports
-                              // FIX: Explicitly access the dictionary using targetId as a string key to fix TS unknown index error
-                              const targetId: string = r.id;
+                              // Renamed variables to avoid shadowing and ensured targetId is correctly inferred as string
+                              const targetId = reportItem.id;
                               const pendingUsed = reports
                                 .filter(other => {
-                                  // Fix: Access sourceConsumption safely by explicitly casting to a string-keyed record
+                                  // Access sourceConsumption safely by explicitly casting to a string-keyed record
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
-                                  // Added explicit string cast to resolve "unknown" index type error
-                                  return other.status === 'pending' && consumption && consumption[targetId as string] !== undefined;
+                                  // Use the narrowed string key for index access
+                                  return other.status === 'pending' && !!consumption && consumption[targetId] !== undefined;
                                 })
                                 .reduce((sum, other) => {
-                                  // Fix: Cast sourceConsumption to avoid 'unknown' index type error
+                                  // Access sourceConsumption safely by explicitly casting to a string-keyed record
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
-                                  // Added explicit string cast to resolve indexing error
-                                  const val = consumption ? consumption[targetId as string] || 0 : 0;
+                                  // Use the narrowed string key for indexing
+                                  const val = (consumption && consumption[targetId]) || 0;
                                   return sum + val;
                                 }, 0);
                               
                               return {
-                                  ...r,
-                                  availableNow: r.quantity - (r.usedQuantity || 0) - pendingUsed
+                                  ...reportItem,
+                                  availableNow: reportItem.quantity - (reportItem.usedQuantity || 0) - pendingUsed
                               };
                           }).filter(r => r.availableNow > 0);
 
