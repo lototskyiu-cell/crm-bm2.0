@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { API } from '../services/api';
 import { store } from '../services/mockStore'; 
@@ -111,11 +110,14 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                           ).map(r => {
                               // 🛠 SMART AVAILABLE CALCULATION: 
                               // Subtract both officially approved usedQuantity AND pending consumptions from other reports
-                              // FIX: Explicitly reference the ID to ensure TS doesn't treat the index as unknown
-                              const targetId = r.id as string;
+                              // FIX: Explicitly access the dictionary using targetId as a string key to fix TS unknown index error
+                              const targetId = String(r.id);
                               const pendingUsed = reports
-                                .filter(other => other.status === 'pending' && other.sourceConsumption && (other.sourceConsumption as any)[targetId])
-                                .reduce((sum, other) => sum + ((other.sourceConsumption as any)[targetId] || 0), 0);
+                                .filter(other => other.status === 'pending' && other.sourceConsumption && (other.sourceConsumption as Record<string, number>)[targetId])
+                                .reduce((sum, other) => {
+                                  const consumption = other.sourceConsumption as Record<string, number> | undefined;
+                                  return sum + (consumption?.[targetId] || 0);
+                                }, 0);
                               
                               return {
                                   ...r,
