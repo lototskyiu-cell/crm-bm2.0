@@ -359,7 +359,58 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                         {showSetupPhoto && (<div><div className="text-sm font-bold text-gray-700 mb-2 flex items-center"><ImageIcon size={16} className="mr-2"/> Карта наладки</div><div className="bg-gray-200 rounded-lg overflow-hidden border border-gray-300 aspect-[4/3] relative group cursor-pointer hover:shadow-lg transition-all" onClick={() => setEnlargedImage(setupMap?.photoUrl!)}><img src={setupMap?.photoUrl} className="w-full h-full object-cover transition-transform group-hover:scale-105" /></div></div>)}
                         {showDrawing && (<div><div className="text-sm font-bold text-gray-700 mb-2 flex items-center"><FileText size={16} className="mr-2"/> Креслення</div><div className="bg-white rounded-lg overflow-hidden border border-gray-300 aspect-[4/3] relative group cursor-pointer hover:shadow-lg transition-all" onClick={() => setEnlargedImage(setupMap?.drawingUrl || productDrawingUrl || '')}><img src={setupMap?.drawingUrl || productDrawingUrl || ''} className="w-full h-full object-contain p-2 transition-transform group-hover:scale-105" /></div></div>)}
                     </div>
-                    {setupMap && (<div><h4 className="font-bold text-gray-800 mb-3 border-b pb-2">Список інструментів</h4><div className="space-y-2">{setupMap.blocks.map((block, idx) => { const tool = tools.find(t => t.id === block.toolId); return (<div key={idx} className="bg-white p-3 rounded-lg border border-gray-200 flex items-center justify-between"><div className="flex items-center flex-1"><div className="w-6 h-6 bg-gray-100 rounded flex items-center justify-center text-xs font-bold text-gray-600 border mr-3 shrink-0">{block.toolNumber || idx + 1}</div>{tool?.photo ? <img src={tool.photo} className="w-10 h-10 rounded object-cover border border-gray-200 mr-3 shadow-sm bg-white" /> : <div className="w-10 h-10 rounded border border-gray-200 mr-3 flex items-center justify-center bg-gray-50"><Settings size={16} className="text-gray-400"/></div>}<div className="text-sm font-bold text-gray-900 line-clamp-1">{block.toolName}</div></div><div className="bg-yellow-50 px-2 py-1 rounded text-xs font-mono text-gray-700 border border-yellow-100">{block.settings}</div></div>); })}</div></div>)}
+                    {setupMap && (
+                      <div>
+                        <h4 className="font-bold text-gray-800 mb-4 border-b pb-2 flex items-center">
+                          <Wrench size={18} className="mr-2 text-slate-400"/>
+                          Список інструментів
+                        </h4>
+                        <div className="space-y-3">
+                          {setupMap.blocks.map((block, idx) => { 
+                            const tool = tools.find(t => t.id === block.toolId); 
+                            return (
+                              <div key={idx} className="bg-white p-3 rounded-2xl border border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between shadow-sm gap-3 transition-all hover:border-blue-200">
+                                <div className="flex items-center flex-1 gap-4 min-w-0">
+                                  {/* Номер інструменту */}
+                                  <div className="w-8 h-8 bg-slate-900 rounded-xl flex items-center justify-center text-[11px] font-black text-white shrink-0 shadow-sm">
+                                    {block.toolNumber || idx + 1}
+                                  </div>
+                                  
+                                  {/* Фото інструменту (більше на мобілках) */}
+                                  <div 
+                                    className="w-20 h-20 sm:w-14 sm:h-14 bg-gray-50 rounded-xl border border-gray-100 overflow-hidden flex items-center justify-center shrink-0 cursor-pointer hover:border-blue-300 transition-all shadow-inner"
+                                    onClick={() => tool?.photo && setEnlargedImage(tool.photo)}
+                                  >
+                                    {tool?.photo ? (
+                                      <img src={tool.photo} className="w-full h-full object-cover" alt={block.toolName} />
+                                    ) : (
+                                      <Settings size={24} className="text-gray-300"/>
+                                    )}
+                                  </div>
+
+                                  {/* Назва інструменту (повна) */}
+                                  <div className="flex flex-col min-w-0 flex-1">
+                                    <div className="text-base sm:text-sm font-black text-gray-900 leading-tight">
+                                      {block.toolName}
+                                    </div>
+                                    <div className="text-[11px] sm:text-[10px] font-bold text-gray-400 uppercase tracking-tighter mt-1">
+                                      {tool?.description ? tool.description : "Інструмент наладки"}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Налаштування / Коментар */}
+                                {block.settings && (
+                                  <div className="bg-amber-50 px-4 py-2.5 rounded-xl text-xs font-bold text-amber-900 border border-amber-100 flex items-center justify-center sm:justify-start self-stretch sm:self-auto">
+                                    {block.settings}
+                                  </div>
+                                )}
+                              </div>
+                            ); 
+                          })}
+                        </div>
+                      </div>
+                    )}
                 </div>
              ) : ( <div className="h-full flex items-center justify-center text-gray-400 flex-col"><FileText size={48} className="mb-4 opacity-30"/><p className="font-medium">Технічна документація відсутня</p></div> )}
           </div>

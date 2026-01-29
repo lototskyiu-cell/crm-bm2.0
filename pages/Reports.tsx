@@ -110,22 +110,20 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                           ).map((reportItem: ProductionReport) => {
                               // 🛠 SMART AVAILABLE CALCULATION: 
                               // Subtract both officially approved usedQuantity AND pending consumptions from other reports
-                              // Use targetId from current scope to avoid 'unknown' index type error
-                              const targetId: string = reportItem.id;
+                              // FIX: Ensure targetId is strictly treated as a string for nested closures to prevent index type errors.
+                              const targetId: string = String(reportItem.id);
                               const pendingUsed = reports
                                 .filter((other: ProductionReport) => {
-                                  // Access sourceConsumption safely by explicitly casting to a string-keyed record
+                                  // FIX: Access sourceConsumption safely by ensuring targetId is valid string key
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
-                                  // Use the narrowed string key for index access
-                                  // Added explicit type cast for targetId to string to satisfy TS compiler in closure
-                                  return other.status === 'pending' && !!consumption && (consumption as any)[targetId as string] !== undefined;
+                                  // Add explicit string cast to fix "Type 'unknown' cannot be used as an index type" error
+                                  return other.status === 'pending' && !!consumption && consumption[targetId as string] !== undefined;
                                 })
                                 .reduce((sum: number, other: ProductionReport) => {
-                                  // Access sourceConsumption safely by explicitly casting to a string-keyed record
+                                  // FIX: Access sourceConsumption safely using verified string key
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
-                                  // Use the narrowed string key for indexing
-                                  // Added explicit type cast for targetId to string to satisfy TS compiler in closure
-                                  const val = (consumption && (consumption as any)[targetId as string]) || 0;
+                                  // Add explicit string cast to fix "Type 'unknown' cannot be used as an index type" error
+                                  const val = (consumption && consumption[targetId as string]) || 0;
                                   return sum + val;
                                 }, 0);
                               
@@ -347,7 +345,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
 
         {isFormOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
-             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 my-auto">
+             <div className="bg-white rounded-xl shadow-2xl w-full max-md p-6 my-auto">
                 <h2 className="text-xl font-bold mb-6">Новий звіт</h2>
                 <div className="space-y-4">
                    <div>
@@ -362,7 +360,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                         <div><label className="block text-sm font-bold text-gray-700 mb-1">Номер партії / Зміна</label><input type="text" className="w-full p-3 border rounded-lg bg-white font-bold" value={batchCode} onChange={e => setBatchCode(e.target.value)} placeholder={isManufacturing ? "Введіть номер партії..." : "Напр. П-1 або Нічна"}/></div>
                         <div className="grid grid-cols-2 gap-4">
                             <div><label className="block text-sm font-bold text-gray-700 mb-1">Вироблено (шт)</label><input type="number" className="w-full p-3 border rounded-lg font-black text-xl" value={qty} onChange={e => setQty(e.target.value)}/></div>
-                            <div><label className="block text-sm font-bold text-red-600 mb-1">Брак (шт)</label><input type="number" className="w-full p-3 border rounded-lg border-red-100 bg-red-50 text-red-700 font-bold" value={scrap} onChange={e => setScrap(e.target.value)}/></div>
+                            <div><label className="block text-sm font-bold text-red-600 mb-1">Брак (шт)</label><input type="number" className="w-full p-3 border rounded-lg border-red-200 bg-red-50 text-red-700 font-bold" value={scrap} onChange={e => setScrap(e.target.value)}/></div>
                         </div>
                         {isAssembly && consumptionGroups.length > 0 && Number(qty) > 0 && (
                             <div className="space-y-3 animate-fade-in">
@@ -439,7 +437,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
         </div>
       </div>
       {isEditModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"><div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6"><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">Редагувати звіт</h3><button onClick={() => setIsEditModalOpen(false)}><X size={20} className="text-gray-400"/></button></div><div className="space-y-4"><div><label className="block text-sm font-bold text-gray-700 mb-1">Придатні (шт)</label><input type="number" className="w-full p-2 border rounded-lg font-bold" value={editQty} onChange={e => handleEditQtyChange(e.target.value)}/></div><div><label className="block text-sm font-bold text-red-600 mb-1">Брак (шт)</label><input type="number" className="w-full p-2 border rounded-lg border-red-200 bg-red-50 font-bold text-red-700" value={editScrap} onChange={e => handleEditScrapChange(e.target.value)}/></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Нотатка</label><textarea className="w-full p-2 border rounded-lg h-20 resize-none" value={editNote} onChange={e => setEditNote(e.target.value)}/></div></div><div className="flex gap-2 mt-6"><button onClick={() => setIsEditModalOpen(false)} className="flex-1 py-2 text-gray-500 font-bold hover:bg-gray-100 rounded-lg">Скасувати</button><button onClick={handleSaveEditedReport} disabled={isSubmitting} className="flex-1 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 flex justify-center items-center transition-all">{isSubmitting ? <Loader size={16} className="animate-spin"/> : <Save size={16}/>}</button></div></div></div>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"><div className="bg-white rounded-xl shadow-2xl w-full max-sm p-6"><div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg">Редагувати звіт</h3><button onClick={() => setIsEditModalOpen(false)}><X size={20} className="text-gray-400"/></button></div><div className="space-y-4"><div><label className="block text-sm font-bold text-gray-700 mb-1">Придатні (шт)</label><input type="number" className="w-full p-2 border rounded-lg font-bold" value={editQty} onChange={e => handleEditQtyChange(e.target.value)}/></div><div><label className="block text-sm font-bold text-red-600 mb-1">Брак (шт)</label><input type="number" className="w-full p-2 border rounded-lg border-red-200 bg-red-50 font-bold text-red-700" value={editScrap} onChange={e => handleEditScrapChange(e.target.value)}/></div><div><label className="block text-sm font-bold text-gray-700 mb-1">Нотатка</label><textarea className="w-full p-2 border rounded-lg h-20 resize-none" value={editNote} onChange={e => setEditNote(e.target.value)}/></div></div><div className="flex gap-2 mt-6"><button onClick={() => setIsEditModalOpen(false)} className="flex-1 py-2 text-gray-500 font-bold hover:bg-gray-100 rounded-lg">Скасувати</button><button onClick={handleSaveEditedReport} disabled={isSubmitting} className="flex-1 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 flex justify-center items-center transition-all">{isSubmitting ? <Loader size={16} className="animate-spin"/> : <Save size={16}/>}</button></div></div></div>
       )}
     </div>
   );
