@@ -116,14 +116,15 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                                 .filter((other: ProductionReport) => {
                                   // FIX: Access sourceConsumption safely by ensuring targetId is valid string key
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
-                                  // Add explicit string cast to fix "Type 'unknown' cannot be used as an index type" error
-                                  return other.status === 'pending' && !!consumption && consumption[targetId as string] !== undefined;
+                                  // Cast as string explicitly within the closure to avoid index signature issues (fix for line 194 error)
+                                  const tid: string = targetId;
+                                  return other.status === 'pending' && !!consumption && consumption[tid] !== undefined;
                                 })
                                 .reduce((sum: number, other: ProductionReport) => {
                                   // FIX: Access sourceConsumption safely using verified string key
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
-                                  // Add explicit string cast to fix "Type 'unknown' cannot be used as an index type" error
-                                  const val = (consumption && consumption[targetId as string]) || 0;
+                                  const tid: string = targetId;
+                                  const val = (consumption && consumption[tid]) || 0;
                                   return sum + val;
                                 }, 0);
                               
@@ -345,7 +346,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
 
         {isFormOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
-             <div className="bg-white rounded-xl shadow-2xl w-full max-md p-6 my-auto">
+             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 my-auto">
                 <h2 className="text-xl font-bold mb-6">Новий звіт</h2>
                 <div className="space-y-4">
                    <div>

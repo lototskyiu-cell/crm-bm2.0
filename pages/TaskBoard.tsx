@@ -376,7 +376,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                                     {block.toolNumber || idx + 1}
                                   </div>
                                   
-                                  {/* Фото інструменту (більше на мобілках) */}
+                                  {/* Фото інструменту (збільшено для мобілок) */}
                                   <div 
                                     className="w-20 h-20 sm:w-14 sm:h-14 bg-gray-50 rounded-xl border border-gray-100 overflow-hidden flex items-center justify-center shrink-0 cursor-pointer hover:border-blue-300 transition-all shadow-inner"
                                     onClick={() => tool?.photo && setEnlargedImage(tool.photo)}
@@ -399,8 +399,8 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
                                   </div>
                                 </div>
 
-                                {/* Налаштування / Коментар */}
-                                {block.settings && (
+                                {/* Налаштування / Коментар - ховаємо якщо "-" або пусто */}
+                                {block.settings && block.settings !== '-' && (
                                   <div className="bg-amber-50 px-4 py-2.5 rounded-xl text-xs font-bold text-amber-900 border border-amber-100 flex items-center justify-center sm:justify-start self-stretch sm:self-auto">
                                     {block.settings}
                                   </div>

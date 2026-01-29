@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, AttendanceRecord, WorkSchedule } from '../types';
 import { API } from '../services/api';
@@ -352,17 +351,17 @@ export const AdminAttendance: React.FC = () => {
                             </span>
                             <span className="text-[9px] text-gray-500 leading-none">{isNaN(dailyPay) ? 0 : Math.round(dailyPay)}₴</span>
                             
-                            {/* ЖОВТИЙ КРУЖЕЧОК: Є переробіток, але не погоджено */} 
-                            {record.verifiedByAdmin && duration > 8 && !record.overtimeApproved && (
-                              <div className="absolute top-1 right-1 w-2 h-2 bg-yellow-400 rounded-full shadow-sm animate-pulse"></div>
+                            {/* ЖОВТИЙ КРУЖЕЧОК: Є відхилення від плану (>30хв), але не погоджено */} 
+                            {record.verifiedByAdmin && overtimeHours > 0 && !record.overtimeApproved && (
+                              <div className="absolute top-1 right-1 w-2 h-2 bg-yellow-400 rounded-full shadow-sm animate-pulse" title="Відхилення від графіку > 30 хв"></div>
                             )}
 
-                            {/* ЗЕЛЕНИЙ КРУЖЕЧОК (Опціонально): Понаднормові погоджено */} 
-                            {record.verifiedByAdmin && duration > 8 && record.overtimeApproved && (
+                            {/* ЗЕЛЕНИЙ КРУЖЕЧОК: Понаднормові погоджено */} 
+                            {record.verifiedByAdmin && overtimeHours > 0 && record.overtimeApproved && (
                               <div className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full shadow-sm"></div>
                             )}
 
-                            {/* Backwards compatibility for unverified view or regular hours */}
+                            {/* Legacy unverified view or regular hours indicators */}
                             {!record.verifiedByAdmin && overtimeHours > 0 && (
                                 <div className={`w-1.5 h-1.5 rounded-full ${record.overtimeApproved ? 'bg-green-500' : 'bg-yellow-500'} mt-1`}></div>
                             )}

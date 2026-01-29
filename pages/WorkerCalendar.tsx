@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, AttendanceRecord, WorkSchedule } from '../types';
 import { API } from '../services/api';
@@ -177,7 +176,8 @@ export const WorkerCalendar: React.FC<WorkerCalendarProps> = ({ currentUser }) =
                   } else {
                       // Work Logic for Mobile
                       const duration = PayrollService.calculateWorkDuration(record);
-                      const hasUnapprovedOvertime = record.verifiedByAdmin && duration > 8 && !record.overtimeApproved;
+                      const { overtimeHours } = PayrollService.calculateOvertime(record, currentUser, schedules);
+                      const hasUnapprovedOvertime = record.verifiedByAdmin && overtimeHours > 0 && !record.overtimeApproved;
 
                       statusLabel = (
                           <div className="flex flex-col items-end">
@@ -186,7 +186,7 @@ export const WorkerCalendar: React.FC<WorkerCalendarProps> = ({ currentUser }) =
                                   {formatTime(duration)}
                                 </span>
                                 {hasUnapprovedOvertime && (
-                                  <span className="text-yellow-500 text-sm" title="Понаднормові не погоджено">⚠️</span>
+                                  <span className="text-yellow-500 text-sm" title="Відхилення від графіку > 30 хв">⚠️</span>
                                 )}
                              </div>
                              {record.verifiedByAdmin ? (
@@ -342,7 +342,7 @@ export const WorkerCalendar: React.FC<WorkerCalendarProps> = ({ currentUser }) =
                     <div className="w-full">
                     <div className={`text-[10px] font-bold uppercase tracking-wide opacity-80 text-left ${textClass}`}>
                         {label}
-                        {record && record.type === 'work' && record.verifiedByAdmin && PayrollService.calculateWorkDuration(record) > 8 && !record.overtimeApproved && (
+                        {record && record.type === 'work' && record.verifiedByAdmin && PayrollService.calculateOvertime(record, currentUser, schedules).overtimeHours > 0 && !record.overtimeApproved && (
                            <span className="text-yellow-500 ml-1">⚠️</span>
                         )}
                     </div>
