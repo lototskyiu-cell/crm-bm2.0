@@ -110,7 +110,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                           ).map((reportItem: ProductionReport) => {
                               // 🛠 SMART AVAILABLE CALCULATION: 
                               // Subtract both officially approved usedQuantity AND pending consumptions from other reports
-                              // Added explicit string type to targetId to fix index type error (Line 195 fix)
+                              // Use targetId from current scope to avoid 'unknown' index type error
                               const targetId: string = reportItem.id;
                               const pendingUsed = reports
                                 .filter((other: ProductionReport) => {

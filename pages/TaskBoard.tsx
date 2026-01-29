@@ -16,7 +16,6 @@ interface TaskBoardProps {
 }
 
 // Helper component for User Avatar with Initials Fallback
-// Added React.FC to fix "Property 'key' does not exist" error
 const UserAvatar: React.FC<{ user: User; size?: string }> = ({ user, size = "w-8 h-8" }) => {
   const initials = `${user.firstName?.[0] || ''}${user.lastName?.[0] || ''}`.toUpperCase() || '?';
   
@@ -114,7 +113,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
   const [users, setUsers] = useState<User[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
-  const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -200,38 +198,55 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
       try {
         const order = orders.find(o => o.id === selectedTask.orderId);
         const productId = order?.productId;
-        if (!productId) { setTechDocs({ setupMap: null, productDrawingUrl: null }); return; }
-
+        
         let matchedMap: SetupMap | null = null;
-        const qDirect = query(collection(db, 'setup_cards'), where('productCatalogId', '==', productId));
-        const directSnap = await getDocs(qDirect);
-        const allProductMaps = directSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as SetupMap));
+        let prodDrawing: string | null = null;
 
-        const workCycleId = order?.workCycleId;
-        if (workCycleId) {
-            const cycleSnap = await getDoc(doc(db, "workStorage", workCycleId));
+        // 1. Direct fetch via Stage Link (MOST ACCURATE)
+        if (selectedTask.stageId && order?.workCycleId) {
+            const cycleSnap = await getDoc(doc(db, "workStorage", order.workCycleId));
             if (cycleSnap.exists()) {
                 const cycleData = cycleSnap.data() as JobCycle;
                 const stage = cycleData.stages?.find(s => s.id === selectedTask.stageId);
-                if (stage?.setupMapId) matchedMap = allProductMaps.find(m => m.id === stage.setupMapId) || null;
+                if (stage?.setupMapId) {
+                    const mapSnap = await getDoc(doc(db, "setup_cards", stage.setupMapId));
+                    if (mapSnap.exists()) {
+                        matchedMap = { id: mapSnap.id, ...mapSnap.data() } as SetupMap;
+                    }
+                }
             }
-        }
-        if (!matchedMap) {
-            const taskTitleBase = selectedTask.title.includes(' - ') ? selectedTask.title.split(' - ').slice(1).join(' - ').trim().toLowerCase() : selectedTask.title.trim().toLowerCase();
-            matchedMap = allProductMaps.find(map => map.name.toLowerCase().includes(taskTitleBase) || taskTitleBase.includes(map.name.toLowerCase())) || null;
         }
 
-        let prodDrawing: string | null = null;
-        const productSnap = await getDoc(doc(db, "catalogs", productId));
-        if (productSnap.exists()) {
-            const productData = productSnap.data();
-            if (productData.drawingId) {
-                const dwgSnap = await getDoc(doc(db, "drawings", productData.drawingId));
-                if (dwgSnap.exists()) prodDrawing = dwgSnap.data().photoUrl;
+        // 2. Fallback search by Product ID & Title Match
+        if (!matchedMap && productId) {
+            const qDirect = query(collection(db, 'setup_cards'), where('productCatalogId', '==', productId));
+            const directSnap = await getDocs(qDirect);
+            const allProductMaps = directSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as SetupMap));
+            
+            const taskTitleBase = selectedTask.title.includes(' - ') 
+                ? selectedTask.title.split(' - ').slice(1).join(' - ').trim().toLowerCase() 
+                : selectedTask.title.trim().toLowerCase();
+            
+            matchedMap = allProductMaps.find(map => 
+                map.name.toLowerCase().includes(taskTitleBase) || 
+                taskTitleBase.includes(map.name.toLowerCase())
+            ) || (allProductMaps.length > 0 ? allProductMaps[0] : null);
+        }
+
+        // 3. Drawing Fetch
+        if (productId) {
+            const productSnap = await getDoc(doc(db, "catalogs", productId));
+            if (productSnap.exists()) {
+                const productData = productSnap.data();
+                if (productData.drawingId) {
+                    const dwgSnap = await getDoc(doc(db, "drawings", productData.drawingId));
+                    if (dwgSnap.exists()) prodDrawing = dwgSnap.data().photoUrl;
+                }
             }
         }
+
         setTechDocs({ setupMap: matchedMap, productDrawingUrl: prodDrawing });
-      } catch (error) { console.error(error); }
+      } catch (error) { console.error("Error fetching technical documentation:", error); }
     };
     fetchDocs();
   }, [selectedTask, orders]);

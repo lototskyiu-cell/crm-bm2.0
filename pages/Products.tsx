@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { store } from '../services/mockStore';
 import { API } from '../services/api';
@@ -40,10 +39,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
   const { canView, loading: permsLoading } = usePermissions(currentUser);
 
   // 🔒 STRICT SUPER ADMIN CHECK
-  // If login is 'Admin', bypass all checks.
   const isSuperAdmin = currentUser?.login === 'Admin';
-  
-  // For others, check standard permissions
   const hasAccess = isSuperAdmin || canView('products_catalog') || canView('products_wip');
 
   // --- STATE DEFINITIONS ---
@@ -76,7 +72,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
   const [wipModalMode, setWipModalMode] = useState<'add' | 'deduct'>('add');
   const [wipSelectedTask, setWipSelectedTask] = useState<Task | null>(null);
   const [wipManualQty, setWipManualQty] = useState<number | string>('');
-  const [wipBatchCode, setWipBatchCode] = useState(''); // NEW STATE
+  const [wipBatchCode, setWipBatchCode] = useState('');
   const [wipDeductType, setWipDeductType] = useState<'adjustment' | 'defect'>('adjustment');
   const [wipNote, setWipNote] = useState('');
   const [wipIsSubmitting, setWipIsSubmitting] = useState(false);
@@ -92,11 +88,12 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
   const [newMapMachine, setNewMapMachine] = useState('');
   const [newMapProductId, setNewMapProductId] = useState('');
   const [newMapDrawingId, setNewMapDrawingId] = useState('');
+  const [newMapPhoto, setNewMapPhoto] = useState('');
+  const [newMapPhotoFile, setNewMapPhotoFile] = useState<File | null>(null);
   const [newMapProcessType, setNewMapProcessType] = useState<'manufacturing' | 'assembly'>('assembly');
   const [newMapComponents, setNewMapComponents] = useState<SetupComponentRequirement[]>([]);
   const [newMapBlocks, setNewMapBlocks] = useState<{tempId: string, toolNumber: string, toolName: string, toolId?: string, settings: string}[]>([]);
   
-  // NEW: State for Cycle Stages (for Setup Map Modal)
   const [currentCycleStages, setCurrentCycleStages] = useState<JobStage[]>([]);
 
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -138,7 +135,6 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    // Permission-based Tab Switching Logic (Only if not Super Admin)
     if (!permsLoading && currentUser && !isSuperAdmin) {
         if (activeMainTab === 'catalog' && !canView('products_catalog')) {
             if (canView('products_wip')) setActiveMainTab('wip');
@@ -239,53 +235,32 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
     }
   }, [isMapModalOpen]);
 
-  // NEW: Fetch Cycle Stages when Product ID changes in Map Modal
   useEffect(() => {
     const fetchCycleStages = async () => {
-        // Clear stages if no product
         if (!newMapProductId) {
             setCurrentCycleStages([]);
             return;
         }
 
-        console.log("🛠 SetupMap: Analyzing Product...", newMapProductId);
-
         let targetCycle: JobCycle | null = null;
-
-        // 1. Direct Link Check (Product -> Cycle)
         const product = products.find(p => p.id === newMapProductId);
         if (product && product.jobCycleId) {
-            console.log("   ↳ Found direct cycle link in Product:", product.jobCycleId);
             try {
                 const item = await API.getWorkStorageItem(product.jobCycleId);
                 if (item && 'stages' in item) targetCycle = item as JobCycle;
-            } catch (e) {
-                console.error("   ⚠️ Failed to fetch linked cycle:", e);
-            }
+            } catch (e) { console.error(e); }
         }
 
-        // 2. Reverse Link Check (Cycle -> Product)
         if (!targetCycle) {
-            console.log("   ↳ No direct link. Searching for cycles referencing this product...");
             try {
                 const linkedCycles = await API.getJobCyclesByProduct(newMapProductId);
-                if (linkedCycles.length > 0) {
-                    targetCycle = linkedCycles[0];
-                    console.log("   ✅ Found linked cycle:", targetCycle.name);
-                } else {
-                    console.log("   ❌ No linked cycles found.");
-                }
-            } catch (e) {
-                console.error("   ⚠️ Error searching cycles:", e);
-            }
+                if (linkedCycles.length > 0) targetCycle = linkedCycles[0];
+            } catch (e) { console.error(e); }
         }
 
-        // 3. Update State
         if (targetCycle && targetCycle.stages) {
-            console.log(`   🎉 Stages loaded: ${targetCycle.stages.length}`);
             setCurrentCycleStages(targetCycle.stages);
         } else {
-            console.warn("   ⚠️ Cycle found but has no stages, or no cycle found.");
             setCurrentCycleStages([]);
         }
     };
@@ -319,7 +294,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                 orderNumber: order?.orderNumber || '???',
                 productName: product?.name || 'Unknown Product',
                 stageName: task.title,
-                batchCode: '-', // Placeholder
+                batchCode: '-', 
                 produced: 0,
                 used: 0,
                 balance: 0,
@@ -463,6 +438,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
       } catch (e) {
           alert("Помилка оновлення залишку");
       } finally {
+          setIsWipModalOpen(false);
           setWipIsSubmitting(false);
       }
   };
@@ -589,17 +565,22 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
     setNewMapMachine(map.machine); 
     setNewMapProductId(map.productCatalogId || ''); 
     setNewMapDrawingId(map.drawingId || '');
+    setNewMapPhoto(map.photoUrl || '');
+    setNewMapPhotoFile(null);
     setNewMapProcessType(map.processType || 'assembly');
     if (map.inputComponents && map.inputComponents.length > 0) { setNewMapComponents(map.inputComponents); } else { const ratio = map.consumptionRatio || 1; if (ratio > 1) { setNewMapComponents([{ sourceStageIndex: 0, ratio: ratio }]); } else { setNewMapComponents([]); } }
     const tempBlocks = map.blocks.map(b => ({ tempId: b.id || `b_${Date.now()}_${Math.random()}`, toolNumber: b.toolNumber || '', toolName: b.toolName, toolId: b.toolId, settings: b.settings }));
     setNewMapBlocks(tempBlocks); setIsMapModalOpen(true);
   };
+
   const handleOpenMapModal = () => { 
     setEditingMapId(null); 
     setNewMapName(''); 
     setNewMapMachine(''); 
     setNewMapProductId(''); 
     setNewMapDrawingId(''); 
+    setNewMapPhoto('');
+    setNewMapPhotoFile(null);
     setNewMapProcessType('assembly');
     setNewMapComponents([]); 
     setNewMapBlocks([]); 
@@ -609,7 +590,9 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
   const addComponentRequirement = () => { 
       setNewMapComponents([...newMapComponents, { sourceStageIndex: 0, ratio: 1, name: '', qty: 1 }]); 
   };
+
   const removeComponentRequirement = (index: number) => { const updated = [...newMapComponents]; updated.splice(index, 1); setNewMapComponents(updated); };
+  
   const updateComponentRequirement = (index: number, field: keyof SetupComponentRequirement, value: any) => { 
       const updated = [...newMapComponents]; 
       updated[index] = { ...updated[index], [field]: value }; 
@@ -621,42 +604,54 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
     if (isUploading) return;
     setIsUploading(true);
     
-    const cleanComponents = newMapComponents.map(comp => ({
-        name: comp.name,
-        qty: Number(comp.qty || comp.ratio || 0),
-        sourceStageIndex: comp.sourceStageIndex || 0,
-        ratio: Number(comp.qty || comp.ratio || 0)
-    })).filter(c => c.name && c.qty > 0);
+    try {
+        let finalPhotoUrl = newMapPhoto;
+        if (newMapPhotoFile) {
+            finalPhotoUrl = await uploadFileToCloudinary(newMapPhotoFile);
+        }
 
-    const selectedDrawing = drawings.find(d => d.id === newMapDrawingId);
-    const finalBlocks: SetupBlock[] = newMapBlocks.map((b, idx) => ({ toolNumber: b.toolNumber || String(idx + 1), toolName: b.toolName || 'Інструмент', toolId: b.toolId, settings: String(b.settings || '') }));
-    
-    const mapData: SetupMap = { 
-        id: editingMapId || `sm_${Date.now()}`, 
-        name: newMapName, 
-        productCatalogId: newMapProductId, 
-        machine: newMapMachine || 'Універсальний', 
-        blocks: finalBlocks, 
-        drawingId: newMapDrawingId, 
-        drawingUrl: selectedDrawing?.photo, 
-        drawingName: selectedDrawing?.name, 
-        programNumber: null, 
-        inputComponents: cleanComponents,
-        processType: newMapProcessType
-    };
-    
-    try { await API.saveSetupMap(mapData); setIsMapModalOpen(false); } catch(e: any) { alert(`Error: ${e.message}`); } finally { setIsUploading(false); }
+        const cleanComponents = newMapComponents.map(comp => ({
+            name: comp.name,
+            qty: Number(comp.qty || comp.ratio || 0),
+            sourceStageIndex: comp.sourceStageIndex || 0,
+            ratio: Number(comp.qty || comp.ratio || 0)
+        })).filter(c => c.name && c.qty > 0);
+
+        const selectedDrawing = drawings.find(d => d.id === newMapDrawingId);
+        const finalBlocks: SetupBlock[] = newMapBlocks.map((b, idx) => ({ toolNumber: b.toolNumber || String(idx + 1), toolName: b.toolName || 'Інструмент', toolId: b.toolId, settings: String(b.settings || '') }));
+        
+        const mapData: SetupMap = { 
+            id: editingMapId || `sm_${Date.now()}`, 
+            name: newMapName, 
+            productCatalogId: newMapProductId, 
+            machine: newMapMachine || 'Універсальний', 
+            blocks: finalBlocks, 
+            drawingId: newMapDrawingId, 
+            drawingUrl: selectedDrawing?.photo, 
+            drawingName: selectedDrawing?.name, 
+            photoUrl: finalPhotoUrl,
+            programNumber: null, 
+            inputComponents: cleanComponents,
+            processType: newMapProcessType
+        };
+        
+        await API.saveSetupMap(mapData); 
+        setIsMapModalOpen(false); 
+    } catch(e: any) { alert(`Error: ${e.message}`); } finally { setIsUploading(false); }
   };
   
   const addBlockField = () => { setNewMapBlocks([...newMapBlocks, { tempId: `temp_${Date.now()}`, toolNumber: '', toolName: '', settings: '' }]); };
   const removeBlockField = (index: number) => { const updated = [...newMapBlocks]; updated.splice(index, 1); setNewMapBlocks(updated); };
+  
   const updateBlockField = (index: number, field: 'toolName' | 'settings' | 'toolNumber' | 'toolId', value: string) => {
     const updated = [...newMapBlocks];
     if (field === 'toolId') { const tool = tools.find(t => t.id === value); if (tool) { updated[index].toolId = tool.id; updated[index].toolName = tool.name; } } else { updated[index][field] = value; }
     setNewMapBlocks(updated);
   };
+
   const handleEditProduct = (p: Product) => { setEditingProductId(p.id); setProdName(p.name); setProdSku(p.sku); setProdPhoto(p.photo || ''); setProdPhotoFile(null); setProdColor(p.colorTag || '#3b82f6'); setProdDrawingId(p.drawingId || ''); setIsProductModalOpen(true); };
   const handleOpenProductModal = () => { setEditingProductId(null); setProdName(''); setProdSku(''); setProdPhoto(''); setProdPhotoFile(null); setProdColor('#3b82f6'); setProdDrawingId(''); setIsProductModalOpen(true); };
+  
   const handleSaveProduct = async () => {
     if (!prodName || !prodSku) { alert("Заповніть назву"); return; }
     if (isUploading) return;
@@ -667,7 +662,18 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
         await API.saveProduct(prodData); setIsProductModalOpen(false);
     } catch (e: any) { alert(`Error: ${e.message}`); } finally { setIsUploading(false); }
   };
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { setProdPhotoFile(file); const reader = new FileReader(); reader.onloadend = () => { if (typeof reader.result === 'string') setProdPhoto(reader.result); }; reader.readAsDataURL(file); } };
+
+  const handleMapFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { 
+    const file = e.target.files?.[0]; 
+    if (file) { 
+        setNewMapPhotoFile(file); 
+        const reader = new FileReader(); 
+        reader.onloadend = () => { if (typeof reader.result === 'string') setNewMapPhoto(reader.result); }; 
+        reader.readAsDataURL(file); 
+    } 
+  };
 
   // 2. LOADING STATE
   if (permsLoading && !isSuperAdmin) {
@@ -758,7 +764,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                     </div>
                 )}
 
-                {/* Sub-section rendering ... */}
+                {/* Sub-section rendering */}
                 {currentSection !== 'root' && (
                     <div className="flex-1 flex flex-col overflow-hidden animate-fade-in">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-3">
@@ -854,7 +860,6 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                             </div>
                         )}
                         
-                        {/* WAREHOUSE SECTION RENDER */}
                         {currentSection === 'warehouse' && (
                             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex-1 flex flex-col">
                                 <div className="overflow-x-auto flex-1">
@@ -1277,7 +1282,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
       {/* 6. STOCK OPERATION MODAL */}
       {isStockModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-sm p-6 m-4 md:m-0">
+              <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-sm p-6 m-4 md:m-0">
                   <h3 className="font-bold text-lg mb-4">{stockOpType === 'add' ? 'Прихід товару' : 'Переміщення / Списання'}</h3>
                   <div className="space-y-4">
                       <div>
@@ -1340,7 +1345,7 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
           </div>
       )}
 
-      {/* 8. SETUP MAP MODAL (Included fully) */}
+      {/* 8. SETUP MAP MODAL */}
       {isMapModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
               <div className="bg-white rounded-xl shadow-xl w-[95%] md:w-full md:max-w-2xl p-6 max-h-[90vh] overflow-y-auto m-4 md:m-0">
@@ -1350,35 +1355,60 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                   </div>
                   
                   <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                          <div>
-                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Назва карти</label>
-                              <input className="w-full p-2 border rounded-lg" value={newMapName} onChange={e => setNewMapName(e.target.value)} placeholder="Напр: Карта для Втулки"/>
+                      <div className="flex gap-4">
+                          <div 
+                              className="w-32 h-32 bg-gray-100 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center relative overflow-hidden group hover:border-blue-400 transition-all cursor-pointer shrink-0"
+                              onClick={() => document.getElementById('map-photo-upload')?.click()}
+                          >
+                              {newMapPhoto ? (
+                                  <img src={newMapPhoto} className="w-full h-full object-cover" alt="Setup Map" />
+                              ) : (
+                                  <div className="text-center p-2">
+                                      <ImageIcon className="w-8 h-8 text-gray-300 mx-auto mb-1" />
+                                      <span className="text-[10px] text-gray-400 font-bold uppercase block">Фото наладки</span>
+                                  </div>
+                              )}
+                              <input id="map-photo-upload" type="file" accept="image/*" className="hidden" onChange={handleMapFileSelect} />
+                              {newMapPhoto && (
+                                  <button 
+                                      onClick={(e) => { e.stopPropagation(); setNewMapPhoto(''); setNewMapPhotoFile(null); }} 
+                                      className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                                  >
+                                      <X size={12}/>
+                                  </button>
+                              )}
                           </div>
-                          <div>
-                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Верстат</label>
-                              <input className="w-full p-2 border rounded-lg" value={newMapMachine} onChange={e => setNewMapMachine(e.target.value)} placeholder="Напр: Haas ST-10"/>
-                          </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                          <div>
-                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Прив'язка до виробу</label>
-                              <SearchableSelect 
-                                  options={products.map(p => ({ value: p.id, label: p.name, image: p.photo }))}
-                                  value={newMapProductId}
-                                  onChange={setNewMapProductId}
-                                  placeholder="Оберіть виріб..."
-                              />
-                          </div>
-                          <div>
-                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Прив'язка до креслення</label>
-                              <SearchableSelect 
-                                  options={drawings.map(d => ({ value: d.id, label: d.name, image: d.photo }))}
-                                  value={newMapDrawingId}
-                                  onChange={setNewMapDrawingId}
-                                  placeholder="Оберіть креслення..."
-                              />
+                          <div className="flex-1 space-y-4">
+                              <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                      <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Назва карти</label>
+                                      <input className="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-bold" value={newMapName} onChange={e => setNewMapName(e.target.value)} placeholder="Напр: ОП-10"/>
+                                  </div>
+                                  <div>
+                                      <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Верстат</label>
+                                      <input className="w-full p-2.5 border rounded-lg font-bold" value={newMapMachine} onChange={e => setNewMapMachine(e.target.value)} placeholder="Напр: Haas ST-10"/>
+                                  </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                      <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Прив'язка до виробу</label>
+                                      <SearchableSelect 
+                                          options={products.map(p => ({ value: p.id, label: p.name, image: p.photo }))}
+                                          value={newMapProductId}
+                                          onChange={setNewMapProductId}
+                                          placeholder="Оберіть виріб..."
+                                      />
+                                  </div>
+                                  <div>
+                                      <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Креслення деталі</label>
+                                      <SearchableSelect 
+                                          options={drawings.map(d => ({ value: d.id, label: d.name, image: d.photo }))}
+                                          value={newMapDrawingId}
+                                          onChange={setNewMapDrawingId}
+                                          placeholder="Оберіть креслення..."
+                                      />
+                                  </div>
+                              </div>
                           </div>
                       </div>
 
@@ -1438,7 +1468,6 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                                 </div>
                             ))}
                           </div>
-                          <p className="text-[10px] text-gray-400 mt-1">Оберіть етап, з якого надходить деталь для цієї операції (для списання зі складу WIP).</p>
                       </div>
 
                       {/* Tool Blocks */}
