@@ -1,4 +1,3 @@
-
 import { db } from "./firebase";
 import { 
   collection, 
@@ -61,8 +60,6 @@ const ApiService = {
   async verifyAdmin(loginInput: string, passwordInput: string): Promise<boolean> {
     try {
       const docRef = doc(db, 'settings', 'global');
-      // If offline, getDoc might fail if not in cache. 
-      // We try to fetch with a timeout-like behavior or handle the exception.
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -72,7 +69,6 @@ const ApiService = {
       }
     } catch (error: any) {
       handleFirestoreError(error, 'verifyAdmin');
-      // Fallback for first-run or dev mode if offline
       if (loginInput === 'Admin' && passwordInput === 'Admin') return true;
       return false;
     }
@@ -417,7 +413,10 @@ const ApiService = {
       try {
           const q = query(collection(db, CATALOGS_COLLECTION), where("type", "==", "product"));
           const querySnapshot = await getDocs(q);
-          return querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any)).filter(p => !p.deleted);
+          return querySnapshot.docs.map(doc => {
+              const data = doc.data();
+              return { ...data, id: doc.id, photo: data.photoUrl } as any;
+          }).filter(p => !p.deleted);
       } catch (error) {
           handleFirestoreError(error, 'getProducts');
           return [];
@@ -427,7 +426,10 @@ const ApiService = {
   subscribeToProducts(callback: (products: Product[]) => void): () => void {
     const q = query(collection(db, CATALOGS_COLLECTION), where("type", "==", "product"));
     return onSnapshot(q, (snapshot) => {
-      callback(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any)).filter(p => !p.deleted));
+      callback(snapshot.docs.map(doc => {
+          const data = doc.data();
+          return { ...data, id: doc.id, photo: data.photoUrl } as any;
+      }).filter(p => !p.deleted));
     }, (error) => handleFirestoreError(error, 'subscribeToProducts'));
   },
 
@@ -435,7 +437,10 @@ const ApiService = {
       try {
           const docRef = doc(db, CATALOGS_COLLECTION, id);
           const docSnap = await getDoc(docRef);
-          if (docSnap.exists() && !docSnap.data().deleted) return { ...docSnap.data(), id: docSnap.id } as Product;
+          if (docSnap.exists() && !docSnap.data().deleted) {
+              const data = docSnap.data();
+              return { ...data, id: docSnap.id, photo: data.photoUrl } as Product;
+          }
           return null;
       } catch (error) {
           handleFirestoreError(error, 'getProduct');
@@ -722,7 +727,12 @@ const ApiService = {
       if (!colName) return [];
       let q = type === 'cycle' ? query(collection(db, colName), where("deletedAt", "!=", null)) : query(collection(db, colName), where("deleted", "==", true));
       const snap = await getDocs(q); 
-      return snap.docs.map(d => ({...d.data(), id: d.id, type})); 
+      return snap.docs.map(d => {
+          const data = d.data();
+          const res: any = {...data, id: d.id, type};
+          if (type === 'product') res.photo = data.photoUrl;
+          return res;
+      }); 
   },
 
   async restoreItem(type: string, id: string): Promise<void> {

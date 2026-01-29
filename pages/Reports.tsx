@@ -117,13 +117,15 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                                   // Access sourceConsumption safely by explicitly casting to a string-keyed record
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
                                   // Use the narrowed string key for index access
-                                  return other.status === 'pending' && !!consumption && consumption[targetId] !== undefined;
+                                  // Added explicit type cast for targetId to string to satisfy TS compiler in closure
+                                  return other.status === 'pending' && !!consumption && (consumption as any)[targetId as string] !== undefined;
                                 })
                                 .reduce((sum: number, other: ProductionReport) => {
                                   // Access sourceConsumption safely by explicitly casting to a string-keyed record
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
                                   // Use the narrowed string key for indexing
-                                  const val = (consumption && consumption[targetId]) || 0;
+                                  // Added explicit type cast for targetId to string to satisfy TS compiler in closure
+                                  const val = (consumption && (consumption as any)[targetId as string]) || 0;
                                   return sum + val;
                                 }, 0);
                               
