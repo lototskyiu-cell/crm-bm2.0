@@ -304,6 +304,18 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
   const handleDelete = (e: React.MouseEvent, id: string) => { e.stopPropagation(); if (!isEditor) return; setDeleteConfirmId(id); };
   const confirmDelete = async () => { if (!deleteConfirmId) return; setIsDeleting(true); try { await API.deleteTask(deleteConfirmId); setDeleteConfirmId(null); } catch(err) { alert("Error deleting task"); } finally { setIsDeleting(false); } };
 
+  const handleArchiveTask = async (e: React.MouseEvent, taskId: string) => {
+    e.stopPropagation();
+    if (!isEditor) return;
+    if (confirm("Архівувати це завдання? Воно перестане відображатися на дошці, але залишиться в архіві.")) {
+        try {
+            await API.updateTaskStatus(taskId, 'archived');
+        } catch (err) {
+            alert("Помилка архівування");
+        }
+    }
+  };
+
   const handleDragStart = (e: React.DragEvent, taskId: string) => { if (isEditor) setDraggedTaskId(taskId); };
   const handleDragOver = (e: React.DragEvent) => { if (isEditor) e.preventDefault(); };
   const handleDrop = async (e: React.DragEvent, newStatus: TaskStatus) => { e.preventDefault(); if (!isEditor || !draggedTaskId) return; const task = tasks.find(t => t.id === draggedTaskId); if (task && task.status !== newStatus) { setTasks(prev => prev.map(t => t.id === draggedTaskId ? { ...t, status: newStatus } : t)); await API.updateTaskStatus(draggedTaskId, newStatus); } setDraggedTaskId(null); };
@@ -316,7 +328,7 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({ currentUser }) => {
     return (
       <div key={task.id} draggable={isEditor && !isArchiveView} onDragStart={(e) => handleDragStart(e, task.id)} onClick={() => setSelectedTaskId(task.id)} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm transition-all cursor-pointer mb-3 group relative overflow-hidden hover:shadow-md animate-fade-in">
         {task.type === 'production' && <div className="absolute bottom-0 left-0 h-1 bg-gray-100 w-full flex"><div className="h-full bg-green-500" style={{width: `${Math.min(100, factPercent)}%`}}/><div className="h-full bg-orange-400 opacity-50" style={{width: `${Math.min(100 - factPercent, pendPercent)}%` , backgroundImage: 'linear-gradient(45deg, rgba(255,255,255,.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.15) 50%, rgba(255,255,255,.15) 75%, transparent 75%, transparent)', backgroundSize: '1rem 1rem'}}/></div>}
-        <div className="flex justify-between items-start mb-2"><div className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${task.priority === 'high' ? 'bg-red-100 text-red-600' : task.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-600'}`}>{task.priority === 'high' ? 'Високий' : task.priority === 'medium' ? 'Середній' : 'Низький'}</div>{isEditor && !isArchiveView && <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={(e) => handleEdit(e, task)} className="p-1 text-gray-400 hover:text-blue-600"><Pencil size={12}/></button><button onClick={(e) => handleDelete(e, task.id)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={12}/></button></div>}</div>
+        <div className="flex justify-between items-start mb-2"><div className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${task.priority === 'high' ? 'bg-red-100 text-red-600' : task.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-600'}`}>{task.priority === 'high' ? 'Високий' : task.priority === 'medium' ? 'Середній' : 'Низький'}</div>{isEditor && !isArchiveView && <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={(e) => handleEdit(e, task)} className="p-1 text-gray-400 hover:text-blue-600" title="Редагувати"><Pencil size={12}/></button><button onClick={(e) => handleArchiveTask(e, task.id)} className="p-1 text-gray-400 hover:text-amber-600" title="В архів"><Archive size={12}/></button><button onClick={(e) => handleDelete(e, task.id)} className="p-1 text-gray-400 hover:text-red-600" title="Видалити"><Trash2 size={12}/></button></div>}</div>
         <h4 className="font-bold text-gray-900 mb-1 leading-tight">{task.title}</h4>
         {task.deadline && <div className="flex items-center text-xs text-orange-600 font-medium mb-2"><AlertTriangle size={12} className="mr-1"/>До: {task.deadline}</div>}
         {task.type === 'production' && <div className="text-[10px] font-bold text-gray-700">{task.completedQuantity} <span className="text-gray-400 font-normal">/ {task.plannedQuantity} шт</span></div>}

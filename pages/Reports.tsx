@@ -110,21 +110,19 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                           ).map((reportItem: ProductionReport) => {
                               // 🛠 SMART AVAILABLE CALCULATION: 
                               // Subtract both officially approved usedQuantity AND pending consumptions from other reports
-                              // FIX: Ensure targetId is strictly treated as a string for nested closures to prevent index type errors.
-                              const targetId: string = String(reportItem.id);
+                              // FIX: Use explicit string type for the captured variable to avoid 'unknown' index error in closures
+                              const targetId = String(reportItem.id);
                               const pendingUsed = reports
                                 .filter((other: ProductionReport) => {
                                   // FIX: Access sourceConsumption safely by ensuring targetId is valid string key
+                                  // Using explicit cast to Record<string, number> for indexing to avoid 'unknown' index type errors
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
-                                  // Cast as string explicitly within the closure to avoid index signature issues (fix for line 194 error)
-                                  const tid: string = targetId;
-                                  return other.status === 'pending' && !!consumption && consumption[tid] !== undefined;
+                                  return other.status === 'pending' && !!consumption && consumption[targetId] !== undefined;
                                 })
                                 .reduce((sum: number, other: ProductionReport) => {
                                   // FIX: Access sourceConsumption safely using verified string key
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
-                                  const tid: string = targetId;
-                                  const val = (consumption && consumption[tid]) || 0;
+                                  const val = (consumption && consumption[targetId]) || 0;
                                   return sum + val;
                                 }, 0);
                               
@@ -346,7 +344,7 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
 
         {isFormOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto">
-             <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 my-auto">
+             <div className="bg-white rounded-xl shadow-2xl w-full max-md p-6 my-auto">
                 <h2 className="text-xl font-bold mb-6">Новий звіт</h2>
                 <div className="space-y-4">
                    <div>
