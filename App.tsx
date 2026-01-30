@@ -39,6 +39,11 @@ const AppContent: React.FC = () => {
         try {
             const parsedUser = JSON.parse(storedUser);
             setCurrentUser(parsedUser);
+            
+            // Check for truancy if Admin is logged in
+            if (parsedUser.role === 'admin') {
+               API.autoCheckAttendance();
+            }
         } catch (e) {
             console.error("Failed to parse stored user", e);
             localStorage.removeItem('currentUser');
@@ -80,6 +85,8 @@ const AppContent: React.FC = () => {
     let nextPath = '/tasks';
     if (user.role === 'admin') {
       nextPath = '/workers';
+      // Trigger attendance check on login
+      API.autoCheckAttendance();
     }
     
     setCurrentPath(nextPath);
@@ -97,6 +104,11 @@ const AppContent: React.FC = () => {
       setSelectedCycleId(null);
       setCurrentPath(path);
       localStorage.setItem('currentPath', path);
+      
+      // Additional check on navigation for Admin
+      if (currentUser?.role === 'admin' && path === '/analytics') {
+          API.autoCheckAttendance();
+      }
   };
 
   const getPageTitle = (path: string) => {

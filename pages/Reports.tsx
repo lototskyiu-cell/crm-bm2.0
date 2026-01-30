@@ -14,7 +14,6 @@ interface ConsumptionGroup {
     name: string;
     qty: number;
     totalNeeded: number;
-    // Added availableNow to the intersection type to match calculation results
     availableBatches: (ProductionReport & { availableNow: number })[];
     selectedBatchIds: Set<string>;
     selectedTotal: number;
@@ -48,9 +47,6 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
   const [editLockedTotal, setEditLockedTotal] = useState(0); 
 
   const [historySearch, setHistorySearch] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-
   const [selectedReportIds, setSelectedReportIds] = useState<Set<string>>(new Set());
 
   const isAssembly = activeSetupMap?.processType === 'assembly';
@@ -108,23 +104,19 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                               r.orderNumber === order.orderNumber &&
                               (r.stageName?.trim() === compName?.trim() || r.taskTitle?.trim() === compName?.trim())
                           ).map((reportItem: ProductionReport) => {
-                              // 🛠 SMART AVAILABLE CALCULATION: 
-                              // Subtract both officially approved usedQuantity AND pending consumptions from other reports
-                              // FIX: Use explicit string type for the captured variable to avoid 'unknown' index error in closures
-                              const targetId: string = String(reportItem.id);
+                              // Fix: Define targetId explicitly as string to avoid type inference issues in nested closures (Line 185)
+                              const targetId: string = reportItem.id;
+                              
                               const pendingUsed = reports
                                 .filter((other: ProductionReport) => {
-                                  // FIX: Access sourceConsumption safely by ensuring targetId is valid string key
-                                  // Using explicit cast to Record<string, number> for indexing to avoid 'unknown' index type errors
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
-                                  // Explicitly cast targetId to string to satisfy TypeScript index signature requirements in nested closure
-                                  return other.status === 'pending' && !!consumption && (consumption as Record<string, number>)[targetId as string] !== undefined;
+                                  // Fix: Explicitly handle targetId as string for index type safety
+                                  return other.status === 'pending' && !!consumption && consumption[targetId] !== undefined;
                                 })
                                 .reduce((sum: number, other: ProductionReport) => {
-                                  // FIX: Access sourceConsumption safely using verified string key
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
-                                  // Explicitly cast targetId to string to satisfy TypeScript index signature requirements in nested closure
-                                  const val = (consumption && (consumption as Record<string, number>)[targetId as string]) || 0;
+                                  // Fix: Explicitly handle targetId as string for index type safety
+                                  const val = (consumption && consumption[targetId]) || 0;
                                   return sum + val;
                                 }, 0);
                               

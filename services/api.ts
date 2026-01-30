@@ -20,6 +20,7 @@ import {
 } from "firebase/firestore";
 import { User, AttendanceRecord, WorkSchedule, Order, Task, Product, ProductStock, DefectItem, SetupMap, Drawing, Tool, JobFolder, JobCycle, Notification, ProductionReport, RoleConfig, ToolFolder, WarehouseItem, ProductionItem, ToolTransaction, JobStage } from "../types";
 import { PayrollService } from "./payroll";
+import { format, getDay } from 'date-fns';
 
 const USERS_COLLECTION = "users";
 const SCHEDULES_COLLECTION = "workSchedules";
@@ -46,10 +47,6 @@ const handleFirestoreError = (error: any, context: string) => {
   return null; 
 };
 
-/**
- * Ensures objects sent to Firestore contain no 'undefined' values.
- * Firestore throws errors on undefined; it expects null or a value.
- */
 const sanitizeForFirestore = (obj: any) => {
   return JSON.parse(JSON.stringify(obj, (key, value) => 
     value === undefined ? null : value
@@ -270,6 +267,84 @@ const ApiService = {
       await updateDoc(doc(db, NOTIFICATIONS_COLLECTION, notificationId), { read: true });
     } catch (error) {
       handleFirestoreError(error, 'markNotificationRead');
+    }
+  },
+
+  async autoCheckAttendance(): Promise<void> {
+    try {
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      const now = new Date();
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      
+      const [allUsers, allSchedules, todayRecords] = await Promise.all([
+        this.getUsers(),
+        this.getSchedules(),
+        this.getAttendanceRecords(undefined, todayStr)
+      ]);
+
+      const activeWorkers = allUsers.filter(u => u.role === 'worker' && u.status !== 'dismissed');
+      const batch = writeBatch(db);
+      let updatesCount = 0;
+
+      for (const worker of activeWorkers) {
+        // Skip if already has ANY record for today (Work or Absence)
+        const hasRecord = todayRecords.some(r => r.userId === worker.id);
+        if (hasRecord) continue;
+
+        // Skip if no schedule assigned
+        if (!worker.workScheduleId) continue;
+        const schedule = allSchedules.find(s => s.id === worker.workScheduleId);
+        if (!schedule || !schedule.startTime) continue;
+
+        // Check if today is a working day based on schedule
+        const dayIndex = (getDay(now) + 6) % 7; 
+        const dayConfig = schedule.days?.find(d => d.dayOfWeek === dayIndex);
+        if (!dayConfig || !dayConfig.isWorking) continue;
+
+        // 30-minute late threshold
+        const [startH, startM] = schedule.startTime.split(':').map(Number);
+        const shiftStartMinutes = startH * 60 + startM;
+        const thresholdMinutes = shiftStartMinutes + 30;
+
+        if (currentMinutes > thresholdMinutes) {
+          const truancyId = `auto_${worker.id}_${todayStr}`;
+          
+          // ID Stability: Check if auto-record already committed in this run or previously
+          if (todayRecords.some(r => r.id === truancyId)) continue;
+
+          const newRecord: AttendanceRecord = {
+            id: truancyId,
+            userId: worker.id,
+            date: todayStr,
+            type: 'absence',
+            absenceType: 'truancy',
+            comment: 'Автоматичний прогул: не з\'явився протягом 30хв від початку зміни',
+            verifiedByAdmin: false,
+            requiresAdminApproval: true,
+            updatedAt: new Date().toISOString()
+          };
+
+          batch.set(doc(db, ATTENDANCE_COLLECTION, truancyId), sanitizeForFirestore(newRecord));
+          
+          await this.sendNotification(
+            'admin',
+            `Працівник ${worker.firstName} ${worker.lastName} не відмітився вчасно (запізнення > 30хв). Автоматично виставлено ПРОГУЛ.`,
+            'warning',
+            truancyId,
+            'admin',
+            'Автоматичний прогул'
+          );
+          
+          updatesCount++;
+        }
+      }
+
+      if (updatesCount > 0) {
+        await batch.commit();
+        console.log(`[Attendance] Auto-generated ${updatesCount} truancy records.`);
+      }
+    } catch (error) {
+      console.error("Critical error in autoCheckAttendance:", error);
     }
   },
 
@@ -591,80 +666,50 @@ const ApiService = {
   async approveReport(id: string, report: ProductionReport): Promise<void> {
       try {
           const batch = writeBatch(db);
-
           batch.update(doc(db, REPORTS_COLLECTION, id), { status: 'approved' });
-          
           const taskRef = doc(db, TASKS_COLLECTION, report.taskId);
           const taskSnap = await getDoc(taskRef);
-          
           if (taskSnap.exists()) {
             const taskData = taskSnap.data();
             const newFact = (taskData.factQuantity || 0) + report.quantity;
             const plan = taskData.planQuantity || 0;
-            
             batch.update(taskRef, {
                 factQuantity: increment(report.quantity),
                 pendingQuantity: increment(-report.quantity),
                 status: (newFact >= plan && plan > 0) ? 'done' : 'in_progress',
                 updatedAt: serverTimestamp()
             });
-
             if (report.sourceConsumption) {
                 Object.entries(report.sourceConsumption).forEach(([sourceBatchId, qty]) => {
-                    batch.update(doc(db, REPORTS_COLLECTION, sourceBatchId), {
-                        usedQuantity: increment(qty)
-                    });
+                    batch.update(doc(db, REPORTS_COLLECTION, sourceBatchId), { usedQuantity: increment(qty) });
                 });
             }
-
             if (taskData.isFinalStage && taskData.orderId) {
                 const orderSnap = await getDoc(doc(db, ORDERS_COLLECTION, taskData.orderId));
                 if (orderSnap.exists()) {
                     const productId = orderSnap.data().productCatalogId;
-                    
                     const whQuery = query(collection(db, WAREHOUSE_PRODUCTS_COLLECTION), where("catalogId", "==", productId));
                     const whSnap = await getDocs(whQuery);
-                    
-                    if (!whSnap.empty) {
-                        batch.update(whSnap.docs[0].ref, { quantity: increment(report.quantity) });
-                    } else {
+                    if (!whSnap.empty) { batch.update(whSnap.docs[0].ref, { quantity: increment(report.quantity) }); }
+                    else {
                         const newWhRef = doc(collection(db, WAREHOUSE_PRODUCTS_COLLECTION));
-                        batch.set(newWhRef, sanitizeForFirestore({
-                            catalogId: productId,
-                            quantity: report.quantity,
-                            minQuantity: 0,
-                            folder: null
-                        }));
+                        batch.set(newWhRef, sanitizeForFirestore({ catalogId: productId, quantity: report.quantity, minQuantity: 0, folder: null }));
                     }
                 }
             }
-
             if (report.scrapQuantity > 0) {
                 const newDefectRef = doc(collection(db, DEFECTS_COLLECTION));
-                batch.set(newDefectRef, sanitizeForFirestore({
-                    productId: report.productName || 'unknown',
-                    quantity: report.scrapQuantity,
-                    reason: report.notes || "Виявлено під час виробництва",
-                    date: serverTimestamp(),
-                    stageName: report.stageName || taskData.title,
-                }));
+                batch.set(newDefectRef, sanitizeForFirestore({ productId: report.productName || 'unknown', quantity: report.scrapQuantity, reason: report.notes || "Виявлено під час виробництва", date: serverTimestamp(), stageName: report.stageName || taskData.title, }));
             }
           }
-          
           await batch.commit();
-      } catch(e) { 
-        console.error("Error in approveReport:", e);
-        throw e; 
-      }
+      } catch(e) { console.error("Error in approveReport:", e); throw e; }
   },
 
   async rejectReport(id: string, report: ProductionReport): Promise<void> {
       try {
           await updateDoc(doc(db, REPORTS_COLLECTION, id), { status: 'rejected' });
-          await updateDoc(doc(db, TASKS_COLLECTION, report.taskId), {
-              pendingQuantity: increment(-report.quantity),
-              updatedAt: serverTimestamp()
-          });
+          await updateDoc(doc(db, TASKS_COLLECTION, report.taskId), { pendingQuantity: increment(-report.quantity), updatedAt: serverTimestamp() });
       } catch(e) { throw e; }
   },
 
