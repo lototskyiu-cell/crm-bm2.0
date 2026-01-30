@@ -770,7 +770,23 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-3">
                             {renderBreadcrumbs()}
                             {currentSection === 'finished' && (
-                                <div className="flex gap-3">
+                                <div className="flex flex-col md:flex-row gap-3 items-center">
+                                    {/* COLOR FILTER SECTION */}
+                                    <div className="bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm flex items-center gap-2">
+                                        <Filter size={16} className="text-gray-400 mr-1"/>
+                                        {COLORS.map(color => (
+                                            <button
+                                                key={color}
+                                                onClick={() => setSelectedColor(selectedColor === color ? null : color)}
+                                                className={`w-4 h-4 rounded-full border transition-transform hover:scale-110 ${selectedColor === color ? 'ring-2 ring-offset-1 ring-slate-900 scale-110' : 'border-transparent'}`}
+                                                style={{ backgroundColor: color }}
+                                            />
+                                        ))}
+                                        {selectedColor && (
+                                            <button onClick={() => setSelectedColor(null)} className="ml-1 text-xs text-gray-400 hover:text-red-500"><X size={14}/></button>
+                                        )}
+                                    </div>
+
                                     <div className="relative">
                                         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
                                         <input 
@@ -830,7 +846,11 @@ export const Products: React.FC<ProductsProps> = ({ currentUser }) => {
                         {/* SUB-COMPONENT CONTENT */}
                         {currentSection === 'finished' && (
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 overflow-y-auto p-1">
-                                {products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.sku.toLowerCase().includes(searchTerm.toLowerCase())).map(product => (
+                                {products.filter(p => {
+                                    const matchesText = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.sku.toLowerCase().includes(searchTerm.toLowerCase());
+                                    const matchesColor = !selectedColor || p.colorTag === selectedColor;
+                                    return matchesText && matchesColor;
+                                }).map(product => (
                                     <div key={product.id} className="bg-white rounded-xl border p-4 shadow-sm hover:shadow-md transition-all group relative">
                                         {product.colorTag && (<div className="absolute top-3 right-3 w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: product.colorTag }}></div>)}
                                         <div className="w-full h-40 bg-gray-100 rounded-lg mb-4 flex items-center justify-center overflow-hidden border relative">

@@ -111,18 +111,20 @@ export const Reports: React.FC<ReportsProps> = ({ currentUser }) => {
                               // 🛠 SMART AVAILABLE CALCULATION: 
                               // Subtract both officially approved usedQuantity AND pending consumptions from other reports
                               // FIX: Use explicit string type for the captured variable to avoid 'unknown' index error in closures
-                              const targetId = String(reportItem.id);
+                              const targetId: string = String(reportItem.id);
                               const pendingUsed = reports
                                 .filter((other: ProductionReport) => {
                                   // FIX: Access sourceConsumption safely by ensuring targetId is valid string key
                                   // Using explicit cast to Record<string, number> for indexing to avoid 'unknown' index type errors
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
-                                  return other.status === 'pending' && !!consumption && consumption[targetId] !== undefined;
+                                  // Explicitly cast targetId to string to satisfy TypeScript index signature requirements in nested closure
+                                  return other.status === 'pending' && !!consumption && (consumption as Record<string, number>)[targetId as string] !== undefined;
                                 })
                                 .reduce((sum: number, other: ProductionReport) => {
                                   // FIX: Access sourceConsumption safely using verified string key
                                   const consumption = other.sourceConsumption as Record<string, number> | undefined;
-                                  const val = (consumption && consumption[targetId]) || 0;
+                                  // Explicitly cast targetId to string to satisfy TypeScript index signature requirements in nested closure
+                                  const val = (consumption && (consumption as Record<string, number>)[targetId as string]) || 0;
                                   return sum + val;
                                 }, 0);
                               
